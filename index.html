@@ -46,7 +46,7 @@ button.b.sec{background:#e5edf2;color:var(--azul)}
 button.b.rojo{background:var(--bad)}
 button.b.verde{background:var(--ok)}
 button.b:disabled{opacity:.45}
-#btnTomar{flex:1;font-size:19px;letter-spacing:.3px}
+#btnTomar{flex:1;font-size:17px;white-space:nowrap;padding:0 8px}
 #pie .b.sec{min-width:76px}
 .pantalla{position:fixed;inset:0;z-index:1000;background:var(--bg);overflow-y:auto;-webkit-overflow-scrolling:touch}
 .hoja{position:fixed;left:0;right:0;bottom:0;top:12%;z-index:900;background:var(--panel);border-radius:16px 16px 0 0;
@@ -263,7 +263,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.2';
+const VERSION = '1.3';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR_MAX = 30;                                 // duración normal de la toma (s)
 let durActual = DUR_MAX;
@@ -434,8 +434,10 @@ let posMarca = null, posCirculo = null, seguir = false, centradoInicial = false;
 function iniciarMapa(){
   cfgMapa = Object.assign({base:'pnoa', over:{}}, lsObj(K.mapa));
   if (typeof cfgMapa.over !== 'object' || !cfgMapa.over) cfgMapa.over = {};
-  mapa = L.map('mapa', {zoomControl:false, preferCanvas:true, renderer:L.canvas({tolerance:10}), maxZoom:21, attributionControl:true})
+  mapa = L.map('mapa', {zoomControl:false, maxZoom:21, attributionControl:true})
     .setView([38.7395, -0.3405], 17);
+  // capas: polígonos debajo, líneas encima, puntos encima de las líneas y mis tomas por encima de todo
+  [['pPoli', 380], ['pLin', 410], ['pPun', 430], ['pTom', 450]].forEach(a => { mapa.createPane(a[0]).style.zIndex = a[1]; });
   L.control.zoom({position:'topleft'}).addTo(mapa);
   L.control.scale({imperial:false, position:'bottomleft'}).addTo(mapa);
   BASES.forEach(b => { capasBase[b.id] = L.tileLayer(b.url, b.opts); });
@@ -452,7 +454,12 @@ function iniciarMapa(){
 
 function guardarCfgMapa(){ lsSetJ(K.mapa, cfgMapa); }
 
-function estiloPunto(e){ return {radius:e.r, color:e.color, fillColor:e.fill, fillOpacity:.95, weight:e.w || 1.2}; }
+function estiloPunto(e){ return {radius:e.r, color:e.color, fillColor:e.fill, fillOpacity:.95, weight:e.w || 1.2, pane:'pPun'}; }
+function iconoTriangulo(fill, borde, tam){
+  tam = tam || 18;
+  return L.divIcon({className:'', iconSize:[tam, tam], iconAnchor:[tam / 2, tam * 0.62], popupAnchor:[0, -tam * 0.5],
+    html:'<svg width="' + tam + '" height="' + tam + '" viewBox="0 0 20 20" style="display:block;overflow:visible"><polygon points="10,2 18.5,17 1.5,17" fill="' + esc(fill) + '" fill-opacity=".95" stroke="' + esc(borde) + '" stroke-width="1.6" stroke-linejoin="round"/></svg>'});
+}
 function estiloDe(capa, props){
   const s = capa.estilo || {};
   if (s.campo){ const c = (s.cats || {})[props[s.campo]]; return c || s.defecto || s; }
@@ -468,11 +475,16 @@ function cargarCapaRef(capa){
   const on = vis == null ? !!capa.visible : !!vis;
   let lyr;
   if (capa.tipo === 'punto'){
-    lyr = L.geoJSON(capa.geojson, {pointToLayer: (f, ll) => L.circleMarker(ll, estiloPunto(estiloDe(capa, f.properties)))});
+    lyr = L.geoJSON(capa.geojson, {pointToLayer: (f, ll) => {
+      const e = estiloDe(capa, f.properties);
+      return capa.simbolo === 'triangulo'
+        ? L.marker(ll, {icon:iconoTriangulo(e.fill || e.color, e.color, 18), pane:'pPun', keyboard:false})
+        : L.circleMarker(ll, estiloPunto(e));
+    }});
   } else if (capa.tipo === 'linea'){
-    lyr = L.geoJSON(capa.geojson, {style: f => { const s = estiloDe(capa, f.properties); return {color:s.color, weight:s.w, opacity:.95}; }});
+    lyr = L.geoJSON(capa.geojson, {pane:'pLin', style: f => { const s = estiloDe(capa, f.properties); return {color:s.color, weight:s.w, opacity:.95}; }});
   } else {
-    lyr = L.geoJSON(capa.geojson, {style: f => { const s = estiloDe(capa, f.properties); return {color:s.color, weight:s.w, fillColor:s.fill, fillOpacity:s.fo == null ? .15 : s.fo}; }});
+    lyr = L.geoJSON(capa.geojson, {pane:'pPoli', style: f => { const s = estiloDe(capa, f.properties); return {color:s.color, weight:s.w, fillColor:s.fill, fillOpacity:s.fo == null ? .15 : s.fo}; }});
   }
   lyr.eachLayer(l => { l.bindPopup(() => tablaAtributos(capa, l.feature.properties)); });
   capasRef[capa.id] = lyr;
@@ -512,7 +524,7 @@ function pintarListaCapas(){
     grupos[g].forEach(c => {
       const vis = cfgMapa.over['ref_' + c.id]; const on = vis == null ? !!c.visible : !!vis;
       const s = c.estilo || {}; const m = s.campo ? (s.defecto || s) : s;
-      const sw = c.tipo === 'linea' ? '<span class="swl" style="border-top-color:' + esc(m.color) + '"></span>'
+      const sw = c.simbolo === 'triangulo' ? '<svg width="16" height="16" viewBox="0 0 20 20" style="vertical-align:-2px;margin-right:6px"><polygon points="10,2 18.5,17 1.5,17" fill="' + esc(m.fill || m.color) + '" stroke="' + esc(m.color) + '" stroke-width="2"/></svg>' : c.tipo === 'linea' ? '<span class="swl" style="border-top-color:' + esc(m.color) + '"></span>'
         : '<span class="sw" style="background:' + esc(m.fill || m.color) + ';border-color:' + esc(m.color) + '"></span>';
       h += '<div class="fila"><input type="checkbox" id="r_' + c.id + '" data-ref="' + c.id + '"' + (on ? ' checked' : '') + '><label for="r_' + c.id + '">' + sw + esc(c.nombre) + ' <span class="muted">(' + c.n + ')</span></label></div>';
     });
@@ -933,7 +945,9 @@ function pintarTomados(){
   tom.forEach(t => {
     if (t.lat == null || t.lon == null) return;
     const col = t.anulado ? '#7b8791' : t.enviado ? '#1e8e5a' : '#c77700';
-    const m = L.circleMarker([t.lat, t.lon], {radius:9, color:'#fff', weight:2, fillColor:col, fillOpacity:.95});
+    const m = t.capa === 'IMBORNAL'
+      ? L.marker([t.lat, t.lon], {icon:iconoTriangulo(col, '#fff', 24), pane:'pTom', keyboard:false})
+      : L.circleMarker([t.lat, t.lon], {radius:9, color:'#fff', weight:2, fillColor:col, fillOpacity:.95, pane:'pTom'});
     m.bindTooltip(String(t.cid), {permanent:true, direction:'top', offset:[0, -8], opacity:.9});
     m.bindPopup('<b>' + esc(t.cid) + '</b>' + (t.anulado ? ' (ANULADO)' : '') + '<br>' + esc(t.hora) + '<br>' + esc(t.calidad) + '<br>' + (t.enviado ? 'Enviado' : 'Pendiente de enviar'));
     capaTom.addLayer(m);
