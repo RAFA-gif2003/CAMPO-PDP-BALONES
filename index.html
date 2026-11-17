@@ -27,6 +27,7 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:
 #cab .chips{display:flex;align-items:center;gap:4px;flex-wrap:nowrap;flex:0 0 auto}
 .chip{background:rgba(255,255,255,.16);border-radius:12px;padding:3px 7px;font-size:12px;white-space:nowrap}
 @media (max-width:480px){#cab{padding-left:8px;padding-right:8px;gap:4px}#cab .tit{font-size:13px}.chip{padding:3px 6px;font-size:11px}}
+@media (max-width:340px){#cab .chips{gap:3px}.chip{padding:3px 5px;font-size:10.5px}#ver{font-size:11px;margin-left:0}#cab .tit{font-size:12px}}
 .chip.ok{background:#1e8e5a}.chip.warn{background:#c77700}.chip.bad{background:#c0392b}
 #ver{font-size:12px;opacity:.85;margin-left:2px}
 #mapaW{position:relative;flex:1;min-height:0}
@@ -268,7 +269,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.4';
+const VERSION = '1.5';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR_MAX = 30;                                 // duración normal de la toma (s)
 let durActual = DUR_MAX;
@@ -1342,7 +1343,7 @@ function retomarBorrador(){
 async function arrancar(){
   // 1. los botones primero: pase lo que pase después, no pueden quedar muertos
   try { conectarBotones(); } catch(e){ logErr('botones: ' + e.message); }
-  try { $('ver').textContent = 'v' + VERSION.split('.')[0] + (PRUEBA ? 't' : ''); pintarUsr(); pintarSync(); } catch(e){ logErr(e.message); }
+  try { $('ver').textContent = 'v' + VERSION + (PRUEBA ? 't' : ''); pintarUsr(); pintarSync(); } catch(e){ logErr(e.message); }
   // 2. mapa
   try { iniciarMapa(); conectarListaCapas(); pintarListaCapas(); pintarTomados(); } catch(e){ logErr('mapa: ' + e.message); aviso('El mapa no se pudo iniciar. Los datos se pueden tomar igualmente.', 'mal', 8000); }
   // 3. almacenamiento
