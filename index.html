@@ -106,6 +106,11 @@ button.b:disabled{opacity:.45}
 table.at{border-collapse:collapse;font-size:13px;width:100%}
 table.at td{border-bottom:1px solid #e3eaef;padding:2px 4px;vertical-align:top}
 table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
+.halo path{filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1.5px #fff)}
+.ajuste{background:#eef3f6;border-radius:8px;padding:8px 10px;margin:4px 0 8px}
+.ajuste .f2{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:14px}
+.ajuste input[type=color]{width:52px;height:38px;border:1px solid #9fb2bf;border-radius:6px;padding:2px;background:#fff}
+.ajuste input[type=range]{flex:1}
 .leaflet-popup-content{margin:10px 12px;font-size:13px;max-height:45vh;overflow:auto}
 .leaflet-container{font-family:var(--sans)}
 #modalUsr{display:flex;align-items:center;justify-content:center;padding:20px;z-index:1300}
@@ -263,7 +268,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.3';
+const VERSION = '1.4';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR_MAX = 30;                                 // duración normal de la toma (s)
 let durActual = DUR_MAX;
@@ -470,21 +475,32 @@ function tablaAtributos(capa, props){
     .map(c => '<tr><td>' + esc(c.etq) + '</td><td>' + esc(props[c.k]) + '</td></tr>').join('');
   return '<b>' + esc(capa.nombre) + '</b><table class="at">' + filas + '</table>';
 }
+function estCapa(id){ const e = (cfgMapa.est || {})[id]; return e && typeof e === 'object' ? e : {}; }
+function estEfectivo(capa, props){
+  const b = Object.assign({}, estiloDe(capa, props)), e = estCapa(capa.id);
+  if (e.color){ if (capa.tipo === 'linea') b.color = e.color; else b.fill = e.color; }
+  if (e.w != null){ if (capa.tipo === 'punto') b.r = e.w; else b.w = e.w; }
+  return b;
+}
 function cargarCapaRef(capa){
   const vis = cfgMapa.over['ref_' + capa.id];
   const on = vis == null ? !!capa.visible : !!vis;
+  const prev = capasRef[capa.id];
+  if (prev && mapa && mapa.hasLayer(prev)) mapa.removeLayer(prev);
   let lyr;
+  const e0 = estCapa(capa.id);
   if (capa.tipo === 'punto'){
     lyr = L.geoJSON(capa.geojson, {pointToLayer: (f, ll) => {
-      const e = estiloDe(capa, f.properties);
+      const e = estEfectivo(capa, f.properties);
       return capa.simbolo === 'triangulo'
-        ? L.marker(ll, {icon:iconoTriangulo(e.fill || e.color, e.color, 18), pane:'pPun', keyboard:false})
+        ? L.marker(ll, {icon:iconoTriangulo(e.fill || e.color, e.color, Math.round((e.r || 6) * 3)), pane:'pPun', keyboard:false})
         : L.circleMarker(ll, estiloPunto(e));
     }});
   } else if (capa.tipo === 'linea'){
-    lyr = L.geoJSON(capa.geojson, {pane:'pLin', style: f => { const s = estiloDe(capa, f.properties); return {color:s.color, weight:s.w, opacity:.95}; }});
+    const halo = e0.halo != null ? !!e0.halo : capa.id === 'pds_tuberias';
+    lyr = L.geoJSON(capa.geojson, {pane:'pLin', style: f => { const s = estEfectivo(capa, f.properties); return {color:s.color, weight:s.w, opacity:.95, className:halo ? 'halo' : ''}; }});
   } else {
-    lyr = L.geoJSON(capa.geojson, {pane:'pPoli', style: f => { const s = estiloDe(capa, f.properties); return {color:s.color, weight:s.w, fillColor:s.fill, fillOpacity:s.fo == null ? .15 : s.fo}; }});
+    lyr = L.geoJSON(capa.geojson, {pane:'pPoli', style: f => { const s = estEfectivo(capa, f.properties); return {color:s.color, weight:s.w, fillColor:s.fill, fillOpacity:s.fo == null ? .15 : s.fo}; }});
   }
   lyr.eachLayer(l => { l.bindPopup(() => tablaAtributos(capa, l.feature.properties)); });
   capasRef[capa.id] = lyr;
@@ -526,12 +542,39 @@ function pintarListaCapas(){
       const s = c.estilo || {}; const m = s.campo ? (s.defecto || s) : s;
       const sw = c.simbolo === 'triangulo' ? '<svg width="16" height="16" viewBox="0 0 20 20" style="vertical-align:-2px;margin-right:6px"><polygon points="10,2 18.5,17 1.5,17" fill="' + esc(m.fill || m.color) + '" stroke="' + esc(m.color) + '" stroke-width="2"/></svg>' : c.tipo === 'linea' ? '<span class="swl" style="border-top-color:' + esc(m.color) + '"></span>'
         : '<span class="sw" style="background:' + esc(m.fill || m.color) + ';border-color:' + esc(m.color) + '"></span>';
-      h += '<div class="fila"><input type="checkbox" id="r_' + c.id + '" data-ref="' + c.id + '"' + (on ? ' checked' : '') + '><label for="r_' + c.id + '">' + sw + esc(c.nombre) + ' <span class="muted">(' + c.n + ')</span></label></div>';
+      const ef = estCapa(c.id);
+      const colBase = ef.color || (c.tipo === 'linea' ? m.color : (m.fill || m.color));
+      const wBase = ef.w != null ? ef.w : (c.tipo === 'punto' ? (m.r || 6) : (m.w || 2));
+      const esLin = c.tipo === 'linea', esPun = c.tipo === 'punto';
+      const halo = ef.halo != null ? !!ef.halo : c.id === 'pds_tuberias';
+      h += '<div class="fila"><input type="checkbox" id="r_' + c.id + '" data-ref="' + c.id + '"' + (on ? ' checked' : '') + '><label for="r_' + c.id + '">' + sw + esc(c.nombre) + ' <span class="muted">(' + c.n + ')</span></label>' +
+        '<button type="button" class="b sec" data-ajustar="' + c.id + '" style="height:36px;font-size:13px;padding:0 10px">Estilo</button></div>' +
+        '<div class="ajuste" id="aj_' + c.id + '" hidden>' +
+        '<div class="f2"><span style="width:62px">Color</span><input type="color" data-est="color" data-capa="' + c.id + '" value="' + esc(/^#[0-9a-f]{6}$/i.test(colBase) ? colBase : '#000000') + '"></div>' +
+        '<div class="f2"><span style="width:62px">' + (esPun ? 'Tamaño' : 'Grosor') + '</span><input type="range" data-est="w" data-capa="' + c.id + '" min="' + (esPun ? 3 : 1) + '" max="' + (esPun ? 14 : 12) + '" step="' + (esPun ? 1 : 0.5) + '" value="' + wBase + '"><span class="muted" id="awv_' + c.id + '">' + wBase + '</span></div>' +
+        (esLin ? '<div class="f2"><input type="checkbox" id="ah_' + c.id + '" data-est="halo" data-capa="' + c.id + '"' + (halo ? ' checked' : '') + ' style="width:22px;height:22px"><label for="ah_' + c.id + '">Contorno blanco (se ve mejor sobre la ortofoto)</label></div>' : '') +
+        '<button type="button" class="b sec" data-restablecer="' + c.id + '" style="height:36px;font-size:13px">Restablecer</button>' +
+        (c.estilo && c.estilo.campo ? '<div class="muted" style="margin-top:4px">Esta capa tiene colores por tipo; al elegir un color se pintan todos del mismo.</div>' : '') +
+        '</div>';
     });
   });
   $('listaRef').innerHTML = h || '<div class="muted">Sin capas cargadas.</div>';
 }
 function conectarListaCapas(){
+  $('pCapas').addEventListener('input', e => {
+    const t = e.target;
+    if (t.dataset && t.dataset.est === 'w'){ const v = $('awv_' + t.dataset.capa); if (v) v.textContent = t.value; }
+  });
+  $('pCapas').addEventListener('click', e => {
+    const t = e.target; if (!t || !t.dataset) return;
+    if (t.dataset.ajustar){ const d = $('aj_' + t.dataset.ajustar); if (d) d.hidden = !d.hidden; }
+    else if (t.dataset.restablecer){
+      const id = t.dataset.restablecer, capa = capasDatos.find(x => x.id === id);
+      if (cfgMapa.est) delete cfgMapa.est[id];
+      guardarCfgMapa(); if (capa) cargarCapaRef(capa); pintarListaCapas();
+      const d = $('aj_' + id); if (d) d.hidden = false;
+    }
+  });
   $('pCapas').addEventListener('change', e => {
     const t = e.target;
     if (t.name === 'base'){
@@ -542,6 +585,14 @@ function conectarListaCapas(){
       cfgMapa.over.catastro = t.checked; t.checked ? capaCatastro.addTo(mapa) : mapa.removeLayer(capaCatastro); guardarCfgMapa();
     } else if (t.id === 'o_tomados'){
       cfgMapa.over.tomados = t.checked; t.checked ? capaTom.addTo(mapa) : mapa.removeLayer(capaTom); guardarCfgMapa();
+    } else if (t.dataset && t.dataset.est){
+      const id = t.dataset.capa, capa = capasDatos.find(x => x.id === id); if (!capa) return;
+      cfgMapa.est = cfgMapa.est && typeof cfgMapa.est === 'object' ? cfgMapa.est : {};
+      const e = cfgMapa.est[id] = Object.assign({}, cfgMapa.est[id]);
+      if (t.dataset.est === 'color') e.color = t.value;
+      else if (t.dataset.est === 'w') e.w = parseFloat(t.value);
+      else if (t.dataset.est === 'halo') e.halo = t.checked;
+      guardarCfgMapa(); cargarCapaRef(capa);
     } else if (t.dataset && t.dataset.ref){
       const l = capasRef[t.dataset.ref]; if (!l) return;
       cfgMapa.over['ref_' + t.dataset.ref] = t.checked; t.checked ? l.addTo(mapa) : mapa.removeLayer(l); guardarCfgMapa();
