@@ -185,6 +185,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
 <section id="pMas" class="hoja" hidden>
   <button class="b sec cerrar" data-cerrar="pMas" type="button" style="height:40px">Cerrar</button>
   <h2>Más</h2>
+  <div id="cajaInst"></div>
   <div class="grupo">Quién toma los datos</div>
   <div class="fila"><label id="masUsr"></label><button id="btnCambiarUsr" class="b sec" type="button" style="height:44px">Cambiar</button></div>
   <div class="grupo">Servidor (hoja de Google)</div>
@@ -269,13 +270,13 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.6';
+const VERSION = '1.7';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR_MAX = 30;                                 // duración normal de la toma (s)
 let durActual = DUR_MAX;
 const MAX_LADO = 1600;
 const PIN_HASH = '107d75d493c22591fcf0a0c99f53e383fc609ba0fc6c45ace855ff15c0b6ad11';                                // SHA-256 del PIN de responsable (ver LEEME)
-const API_PREDETERMINADA = '';                      // enlace /exec; si se rellena, los móviles no tienen que pegarlo
+const API_PREDETERMINADA = 'https://script.google.com/macros/s/AKfycbxrwlWLdc0nsidGMNs7uzHYuKAW-u2NUyhA__FmVuppnBBobkgfIyPPQUknORJlvSfPpw/exec';                      // enlace /exec; si se rellena, los móviles no tienen que pegarlo
 const K = {usr:'pdpUsuario', api:'pdpApi', clave:'pdpClave', cola:'pdpCola', colaF:'pdpColaFotos', colaA:'pdpColaAnul',
   tom:'pdpTomados', idx:'pdpIdxFotos', seq:'pdpSeq', bor:'pdpBorrador', dom:'pdpDominios', mapa:'pdpMapa', ult:'pdpUltEnvio', dur:'pdpDuracion'};
 /* Duración de la toma: 30 s salvo que el responsable la haya reducido en ESTE móvil. */
@@ -1145,7 +1146,20 @@ async function sha256(txt){
   const b = await crypto.subtle.digest('SHA-256', new TextEncoder().encode(txt));
   return Array.from(new Uint8Array(b)).map(x => x.toString(16).padStart(2, '0')).join('');
 }
+let promptInst = null;
+function esStandalone(){ try { return window.matchMedia('(display-mode: standalone)').matches || navigator.standalone === true; } catch(e){ return false; } }
+function pintarInstalar(){
+  const c = $('cajaInst'); if (!c) return;
+  if (esStandalone()){ c.innerHTML = ''; return; }
+  const ios = /iphone|ipad|ipod/i.test(navigator.userAgent);
+  c.innerHTML = '<div class="grupo">Instalar la app</div>' + (promptInst
+    ? '<div class="fila"><label>Añadirla a la pantalla de inicio</label><button id="btnInstalar" class="b verde" type="button" style="height:44px">Instalar</button></div>'
+    : '<div class="alerta warn">' + (ios ? 'En iPhone: botón Compartir > «Añadir a pantalla de inicio».' : 'En el menú del navegador (⋮): «Instalar aplicación» o «Añadir a pantalla de inicio».') + '</div>');
+}
+window.addEventListener('beforeinstallprompt', e => { e.preventDefault(); promptInst = e; pintarInstalar(); });
+window.addEventListener('appinstalled', () => { promptInst = null; pintarInstalar(); });
 function pintarMas(){
+  pintarInstalar();
   $('masUsr').textContent = siglas() ? 'Iniciales: ' + siglas() : 'Sin iniciales: no se pueden tomar puntos.';
   const u = apiUrl();
   $('masApi').textContent = u ? 'Enlace configurado' + (lsGet(K.ult, '') ? ' · último envío ' + lsGet(K.ult, '') : '') : 'Falta el enlace del servidor.';
@@ -1290,7 +1304,8 @@ function conectarBotones(){
   $('btnCsv').addEventListener('click', csvPuntos);
   $('pMas').addEventListener('click', e => {
     const id = e.target && e.target.id;
-    if (id === 'btnPin') entrarPin();
+    if (id === 'btnInstalar' && promptInst){ promptInst.prompt(); promptInst.userChoice.then(() => { promptInst = null; pintarInstalar(); }).catch(() => {}); }
+    else if (id === 'btnPin') entrarPin();
     else if (id === 'btnBorrarTodo') borrarTodo();
     else if (id === 'btnDur30'){ lsDel(K.dur); pintarMas(); }
     else if (id === 'btnDur'){
@@ -1367,6 +1382,7 @@ async function arrancar(){
   if (lsGet(K.bor, '')){ aviso('Había una toma sin guardar. Termínala o repítela.', 'aviso', 6000); retomarBorrador(); }
   if (!siglas()) setTimeout(() => { if (!$('formu').hidden) return; pedirSiglas(); }, 400);
   pintarSync(); cargarDominios(); sincronizar(true); subirFotos();
+  if (!esStandalone() && !lsGet('pdpAvisoInst', '')){ lsSet('pdpAvisoInst', '1'); setTimeout(() => aviso('Para tenerla como una app: Más > Instalar la app.', '', 9000), 1500); }
 }
 window.addEventListener('online', () => { sincronizar(true); subirFotos(); cargarDominios(); });
 setInterval(() => { sincronizar(true); subirFotos(); }, 20000);

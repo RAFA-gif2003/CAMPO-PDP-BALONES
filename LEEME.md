@@ -11,7 +11,7 @@ App de campo (PWA) para inventariar la red de Balones con el móvil. Esta primer
    - Cada vez que cambies el script: Implementar > Administrar implementaciones > editar > Nueva versión.
 5. **Clave opcional.** Si quieres que el script solo acepte envíos de tus móviles, escribe una clave en la línea `var CLAVE = '';` del script y repítela en cada móvil (Más > Enlace). La clave no va en el repositorio público.
 6. **GitHub Pages.** Sube a un repositorio todo el contenido de esta carpeta (`index.html`, `sw.js`, `manifest.webmanifest`, `capas.json`, iconos y carpeta `leaflet`). Activa Pages sobre la rama principal. Abre la URL en cada móvil con Chrome y usa «Añadir a pantalla de inicio».
-7. **En cada móvil.** Abre la app, escribe las iniciales (se piden una vez), ve a Más > Enlace, pega la URL `/exec` (y la clave si la usas) y guarda. Si prefieres que los móviles no tengan que pegarla, rellena `API_PREDETERMINADA` al principio del script de `index.html`.
+7. **En cada móvil.** Abre la app y escribe las iniciales (se piden una vez). El enlace del servidor ya va incluido en `API_PREDETERMINADA` (principio del script de `index.html`); Más > Enlace permite cambiarlo. Más > Instalar la app la añade a la pantalla de inicio.
 8. **PIN de responsable.** En Más > Responsable, escribe el PIN que quieras y pulsa Calcular. Pega el resultado en `PIN_HASH` (principio del script de `index.html`) y vuelve a publicar. El PIN solo protege «borrar los datos de este móvil». Los técnicos no lo necesitan.
 9. **Mapa sin cobertura.** Con cobertura, en Más > Descargar guarda el mapa base del casco (PNOA e IGN Base, unas 390 teselas).
 
