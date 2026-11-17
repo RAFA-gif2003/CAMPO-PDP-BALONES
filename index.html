@@ -23,9 +23,10 @@ html,body{height:100%;margin:0;background:var(--bg);color:var(--fg);font-family:
 #app{display:flex;flex-direction:column;height:100vh;height:100dvh}
 #cab{background:var(--azul);color:#fff;display:flex;align-items:center;justify-content:space-between;
   gap:8px;padding:6px 10px;padding-top:max(6px,env(safe-area-inset-top));min-height:44px}
-#cab .tit{font-weight:700;font-size:15px;white-space:nowrap}
-#cab .chips{display:flex;align-items:center;gap:6px;flex-wrap:nowrap}
-.chip{background:rgba(255,255,255,.16);border-radius:12px;padding:3px 9px;font-size:12px;white-space:nowrap}
+#cab .tit{font-weight:700;font-size:15px;white-space:nowrap;overflow:hidden;text-overflow:ellipsis;min-width:0;flex:1 1 auto}
+#cab .chips{display:flex;align-items:center;gap:4px;flex-wrap:nowrap;flex:0 0 auto}
+.chip{background:rgba(255,255,255,.16);border-radius:12px;padding:3px 7px;font-size:12px;white-space:nowrap}
+@media (max-width:480px){#cab{padding-left:8px;padding-right:8px;gap:4px}#cab .tit{font-size:13px}.chip{padding:3px 6px;font-size:11px}}
 .chip.ok{background:#1e8e5a}.chip.warn{background:#c77700}.chip.bad{background:#c0392b}
 #ver{font-size:12px;opacity:.85;margin-left:2px}
 #mapaW{position:relative;flex:1;min-height:0}
@@ -122,7 +123,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
 <body>
 <div id="app">
   <header id="cab">
-    <div class="tit">Campo PDP Balones</div>
+    <div class="tit">PDP Balones</div>
     <div class="chips">
       <span id="chipUsr" class="chip">sin iniciales</span>
       <span id="chipGps" class="chip">GPS…</span>
@@ -250,7 +251,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.0';
+const VERSION = '1.1';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR = PRUEBA ? 5 : 30;                        // segundos de la toma
 const FOTO_EN = Math.floor(DUR / 2);                // a mitad de la cuenta
@@ -911,7 +912,7 @@ function pendTotal(){ return cola.length + colaF.length + colaA.length + pendFot
 function pintarSync(){
   const n = cola.length + colaA.length, nf = pendFotos();
   const c = $('chipPend');
-  c.textContent = nf ? n + ' + ' + nf + ' foto' : String(n);
+  c.textContent = nf ? n + '+' + nf + ' f' : String(n);
   c.className = 'chip' + (n || nf ? ' warn' : ' ok');
   if ($('btnSync')) $('btnSync').disabled = !pendTotal() || !apiUrl();
 }
