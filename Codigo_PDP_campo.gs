@@ -16,18 +16,36 @@ var DOMINIOS = {
   patologias: ['Sin patología', 'Falta limpieza', 'Sedimentos', 'Toallitas', 'Raíces', 'Colmatado', 'No accesible', 'Otros'],
   si_no: ['Sí', 'No'],
   destino_alivio: ['A cauce natural', 'Otro'],
+  tipo_imbornal: ['Sumidero de calzada', 'Buzón', 'Rejilla en acera', 'Rejilla transversal', 'Sumidero de cuneta', 'Otro'],
+  material_reja: ['Fundición', 'Acero', 'Hormigón', 'Otro'],
+  obstruccion: ['Sin obstrucción', 'Parcial', 'Total'],
+  conectado_a: ['Pozo', 'Colector', 'Otro imbornal', 'Desconocido'],
+  tipo_red_vertido: ['Pluviales', 'Residuales', 'Unitaria'],
+  estructura_vertido: ['Boca de tubería', 'Aliviadero', 'Canal', 'Arqueta', 'Otra'],
+  material_vertido: ['Hormigón', 'PVC', 'PE', 'Fundición', 'Gres', 'Otro'],
+  destino_vertido: ['Barranco', 'Cauce', 'Terreno', 'Otra red', 'Otro'],
+  caudal_obs: ['Sin flujo', 'Escaso', 'Moderado', 'Abundante'],
+  evidencias: ['Sin evidencias', 'Olor', 'Espuma', 'Sólidos', 'Color anómalo'],
   material_conducto: ['THM', 'PVC corrugado', 'PVC liso', 'PE corrugado', 'Hormigón armado', 'Fundición', 'Gres', 'Galería rectangular', 'Otro']
 };
 
-var CAB_CAPA = ['recibido', 'fecha_hora', 'usuario', 'id_elemento', 'estado_registro', 'calidad', 'lat', 'lon', 'mapa',
-  'lecturas', 'dispersion_m', 'precision_gps_m', 'cota_gps_m', 'ref_id', 'ref_dist_m',
-  'red', 'tipo', 'material', 'forma_tapa', 'd_tapa_cm', 'prof_solera_m', 'estado', 'sedimentos_pct', 'accesible', 'patologias',
-  'resalto', 'prof_resalto_m', 'alivio', 'destino_alivio', 'acometidas', 'imbornales_conectados', 'observaciones',
-  'n_entradas', 'n_salidas', 'conductos', 'fotos', 'fotos_drive', 'app', 'id'];
+var HEAD = ['recibido', 'fecha_hora', 'usuario', 'id_elemento', 'estado_registro', 'calidad', 'lat', 'lon', 'mapa',
+  'lecturas', 'duracion_s', 'dispersion_m', 'precision_gps_m', 'cota_gps_m', 'ref_id', 'ref_dist_m'];
+var ATTR = {
+  POZO: ['red', 'tipo', 'material', 'forma_tapa', 'd_tapa_cm', 'prof_solera_m', 'estado', 'sedimentos_pct', 'accesible', 'patologias',
+    'resalto', 'prof_resalto_m', 'alivio', 'destino_alivio', 'acometidas', 'imbornales_conectados', 'observaciones'],
+  IMBORNAL: ['red', 'tipo_imbornal', 'largo_reja_cm', 'ancho_reja_cm', 'material_reja', 'sifonico', 'estado', 'obstruccion',
+    'conectado_a', 'd_conexion_mm', 'prof_m', 'observaciones'],
+  VERTIDO: ['tipo_red', 'estructura', 'd_mm', 'material', 'destino', 'cauce', 'resguardo_m', 'estado', 'caudal', 'evidencias', 'observaciones']
+};
+function capa_(c) { c = String(c || 'POZO').toUpperCase(); return ATTR[c] ? c : 'POZO'; }
+function cabCapa_(c) {
+  c = capa_(c);
+  var cond = c === 'POZO' ? ['n_entradas', 'n_salidas', 'conductos'] : [];
+  return HEAD.concat(ATTR[c], cond, ['fotos', 'fotos_drive', 'app', 'id']);
+}
 var CAB_FOTOS = ['recibido', 'fecha_hora', 'usuario', 'capa', 'id_elemento', 'nombre_archivo', 'en_medicion_30s', 'peso_kb', 'alto_pie_px',
   'lat', 'lon', 'mapa', 'recibida_en_drive', 'id'];
-var CAMPOS_ATTR = ['red', 'tipo', 'material', 'forma_tapa', 'd_tapa_cm', 'prof_solera_m', 'estado', 'sedimentos_pct', 'accesible', 'patologias',
-  'resalto', 'prof_resalto_m', 'alivio', 'destino_alivio', 'acometidas', 'imbornales_conectados', 'observaciones'];
 
 /* Ejecutar una vez a mano desde el editor: concede el permiso de Drive. */
 function autorizarDrive() {
@@ -88,7 +106,7 @@ function idsExistentes_(h) {
   v.forEach(function (r) { if (r[0] !== '') o[String(r[0])] = true; });
   return o;
 }
-function nuevasFilas_(h, cab, objetos) {
+function nuevasFilas_(h, objetos) {
   var ex = idsExistentes_(h);
   var filas = [];
   objetos.forEach(function (o) {
@@ -110,34 +128,34 @@ function filaRegistro_(r) {
   var o = {
     recibido: new Date(), fecha_hora: r.hora, usuario: r.usuario, id_elemento: r.cid, estado_registro: 'VIGENTE',
     calidad: r.calidad, lat: r.lat, lon: r.lon, mapa: enlaceMapa_(r.lat, r.lon),
-    lecturas: r.lecturas, dispersion_m: r.disp, precision_gps_m: r.prec, cota_gps_m: r.cota,
+    lecturas: r.lecturas, duracion_s: r.dur, dispersion_m: r.disp, precision_gps_m: r.prec, cota_gps_m: r.cota,
     ref_id: r.ref, ref_dist_m: r.refDist,
     n_entradas: cond.filter(function (c) { return c.s === 'E'; }).length,
     n_salidas: cond.filter(function (c) { return c.s === 'S'; }).length,
     conductos: cond.map(function (c) { return (c.s === 'E' ? 'E' : 'S') + ' Ø' + (c.d == null ? '' : c.d) + ' ' + (c.m || '') + ' p' + (c.p == null ? '' : c.p); }).join(' | '),
     fotos: (r.fotos || []).join(' | '), fotos_drive: '', app: r.app, id: r.id
   };
-  CAMPOS_ATTR.forEach(function (k) {
+  ATTR[capa_(r.capa)].forEach(function (k) {
     var v = a[k];
     o[k] = Array.isArray(v) ? v.join('; ') : (v === undefined || v === null ? '' : v);
   });
   return o;
 }
-function nombreHojaCapa_(capa) { return String(capa || 'POZO').toUpperCase(); }
+function nombreHojaCapa_(capa) { return capa_(capa); }
 
 function guardarRegistros_(registros) {
   var porCapa = {}, n = 0;
   registros.forEach(function (r) { var k = nombreHojaCapa_(r.capa); (porCapa[k] = porCapa[k] || []).push(r); });
   Object.keys(porCapa).forEach(function (k) {
-    var h = hoja_(k, CAB_CAPA);
-    n += nuevasFilas_(h, CAB_CAPA, porCapa[k].map(filaRegistro_));
+    var h = hoja_(k, cabCapa_(k));
+    n += nuevasFilas_(h, porCapa[k].map(filaRegistro_));
   });
   return n;
 }
 function guardarFichasFotos_(fotos) {
   if (!fotos.length) return 0;
   var h = hoja_(HOJA_FOTOS, CAB_FOTOS);
-  return nuevasFilas_(h, CAB_FOTOS, fotos.map(function (f) {
+  return nuevasFilas_(h, fotos.map(function (f) {
     return {
       recibido: new Date(), fecha_hora: f.hora, usuario: f.usuario, capa: f.capa, id_elemento: f.cid, nombre_archivo: f.nombre,
       en_medicion_30s: f.auto ? 'sí' : 'no', peso_kb: f.peso ? Math.round(f.peso / 1024) : '', alto_pie_px: f.alto || '',
@@ -148,7 +166,7 @@ function guardarFichasFotos_(fotos) {
 function anular_(anulaciones) {
   var n = 0;
   anulaciones.forEach(function (a) {
-    var h = hoja_(nombreHojaCapa_(a.capa), CAB_CAPA);
+    var h = hoja_(nombreHojaCapa_(a.capa), cabCapa_(a.capa));
     var cid = col_(h, 'id'), ce = col_(h, 'estado_registro');
     var ult = h.getLastRow();
     if (ult < 2) return;
@@ -189,7 +207,7 @@ function marcarSubida_(im, url) {
     }
   }
   if (im.capa && im.cid) {
-    var hc = hoja_(nombreHojaCapa_(im.capa), CAB_CAPA);
+    var hc = hoja_(nombreHojaCapa_(im.capa), cabCapa_(im.capa));
     var ci = col_(hc, 'id_elemento'), cd = col_(hc, 'fotos_drive');
     var u = hc.getLastRow();
     if (u >= 2) {
@@ -208,11 +226,12 @@ function marcarSubida_(im, url) {
 
 function sembrarDominios_() {
   var h = hoja_(HOJA_DOM, ['lista', 'valor']);
-  if (h.getLastRow() < 2) {
-    var filas = [];
-    Object.keys(DOMINIOS).forEach(function (k) { DOMINIOS[k].forEach(function (v) { filas.push([k, v]); }); });
-    h.getRange(2, 1, filas.length, 2).setValues(filas);
-  }
+  var n = h.getLastRow();
+  var hay = {};
+  if (n >= 2) h.getRange(2, 1, n - 1, 1).getValues().forEach(function (r) { hay[String(r[0])] = true; });
+  var filas = [];
+  Object.keys(DOMINIOS).forEach(function (k) { if (!hay[k]) DOMINIOS[k].forEach(function (v) { filas.push([k, v]); }); });
+  if (filas.length) h.getRange(n + 1, 1, filas.length, 2).setValues(filas);
   return h;
 }
 function leerDominios_() {

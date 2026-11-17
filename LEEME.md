@@ -1,4 +1,4 @@
-# Campo PDP Balones · fase 1
+# Campo PDP Balones · v1.2
 
 App de campo (PWA) para inventariar la red de Balones con el móvil. Esta primera versión incluye: mapa con PNOA, IGN Base, OpenStreetMap y Catastro; tu posición y su precisión; las capas de referencia del PDS, Geonet, vertidos y subcuencas (solo lectura, con atributos al tocar); toma de POZO de 30 s con foto automática; formulario; envío a la hoja de Google; y funcionamiento sin cobertura.
 
@@ -15,9 +15,9 @@ App de campo (PWA) para inventariar la red de Balones con el móvil. Esta primer
 8. **PIN de responsable.** En Más > Responsable, escribe el PIN que quieras y pulsa Calcular. Pega el resultado en `PIN_HASH` (principio del script de `index.html`) y vuelve a publicar. El PIN solo protege «borrar los datos de este móvil». Los técnicos no lo necesitan.
 9. **Mapa sin cobertura.** Con cobertura, en Más > Descargar guarda el mapa base del casco (PNOA e IGN Base, unas 390 teselas).
 
-## Cómo se toma un pozo
+## Cómo se toma un punto
 
-Tomar pozo > «Sí, estoy encima» > 30 s quieto, móvil a 1 m del suelo en vertical sobre el elemento. A mitad de la cuenta hace una foto automática con el ID, las iniciales, la fecha y las coordenadas escritas en la imagen. Después se rellena el formulario (rojo = obligatorio) y se guarda. Si hay cobertura, sale solo; si no, queda en cola y sale cuando vuelva. El contador de arriba a la derecha muestra lo pendiente.
+Tomar punto > elige POZO, IMBORNAL o PUNTO DE VERTIDO > «Sí, estoy encima» > 30 s quieto, móvil a 1 m del suelo en vertical sobre el elemento. A mitad de la cuenta hace una foto automática con el ID, las iniciales, la fecha y las coordenadas escritas en la imagen. Después se rellena el formulario (rojo = obligatorio) y se guarda. Si hay cobertura, sale solo; si no, queda en cola y sale cuando vuelva. El contador de arriba a la derecha muestra lo pendiente.
 
 - Identificador: `POZ-<iniciales>-<nº>` (p. ej. POZ-RB-012). Foto: `POZ-RB-012_RB_M30_AAAAMMDD_HHMMSS.jpg`; las fotos extra sin `_M30`.
 - Se guarda la **mediana** de las lecturas, el número de lecturas, la dispersión (m) y la precisión GPS. Si hay pocas lecturas (<10), dispersión >6 m o precisión >10 m, la toma sale marcada «REVISAR» y la app avisa antes de guardar.
@@ -40,3 +40,11 @@ Pestañas `POZO`, `Fotos` y `Dominios` (se crean solas al primer envío). Cada f
 ## Siguientes fases
 
 2. IMBORNAL y PUNTO DE VERTIDO. 3. CONDUCTO (entre dos nodos) y ayuda de elementos cercanos. 4. Exportación a GeoJSON/CSV para QGIS (X/Y en UTM 30N).
+
+## Novedades v1.2
+
+- Tres tipos de punto (POZO, IMBORNAL, PUNTO DE VERTIDO), cada uno con sus campos y su pestaña en la hoja (`POZO`, `IMBORNAL`, `VERTIDO`). Solo es obligatoria la red (en el vertido, la red que vierte).
+- Fotos adicionales: en el formulario y, después, desde Mis puntos > + Foto.
+- Responsable (con PIN): duración de la toma de 5 a 30 s en ese móvil, y borrar puntos de ese móvil. Cada punto guarda la duración usada (`duracion_s`).
+- Subcuencas: solo las del PDP 2026.
+- Al actualizar el script, edita la implementación con «Nueva versión». Las listas nuevas se añaden solas a la pestaña `Dominios`.
