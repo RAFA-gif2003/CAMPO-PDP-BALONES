@@ -49,6 +49,6 @@ Pestañas `POZO`, `Fotos` y `Dominios` (se crean solas al primer envío). Cada f
 - Subcuencas: solo las del PDP 2026.
 - Al actualizar el script, edita la implementación con «Nueva versión». Las listas nuevas se añaden solas a la pestaña `Dominios`.
 
-## Exportar a QGIS (v1.8)
+## Exportar a QGIS (v1.9)
 
-Más > SHP genera un ZIP con `POZOS`, `IMBORNALES` y `VERTIDOS` (ETRS89 / UTM 30N, con UTF-8), una carpeta `fotos` con las imágenes y un `LEEME.txt`. Los puntos anulados no se exportan. Las columnas `FOTO_1` a `FOTO_5` llevan la ruta relativa `fotos/<nombre>.jpg`.
+La exportación la hace el servidor desde la hoja y la deja en Drive, en la carpeta `Exportacion QGIS` (junto a la hoja). Se lanza desde la app (Más > Exportar) o desde la hoja (menú «Campo PDP» > Exportar a QGIS). Genera `POZOS`, `IMBORNALES` y `VERTIDOS` (ETRS89 / UTM 30N, UTF-8) y un ZIP con ellos. Los puntos anulados no se exportan. Cada exportación sustituye a la anterior. Las columnas `FOTO_1` a `FOTO_5` llevan el nombre de la foto y `URL_1` a `URL_5` su enlace en Drive. Tras actualizar el script, hay que volver a ejecutar `autorizarDrive` (hay un permiso nuevo) y crear una nueva versión de la implementación.

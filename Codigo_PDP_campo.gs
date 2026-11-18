@@ -270,9 +270,209 @@ function doGet(e) {
   var q = e && e.parameter && e.parameter.q;
   if (CLAVE && (!e.parameter || e.parameter.clave !== CLAVE)) return json_({ok: false, error: 'clave incorrecta'});
   if (q === 'dominios') return json_({ok: true, dominios: leerDominios_()});
+  if (q === 'exportar') {
+    var lock = LockService.getScriptLock();
+    try { lock.waitLock(25000); return json_({ok: true, exportacion: exportarQgis()}); }
+    catch (err) { return json_({ok: false, error: String(err && err.message || err)}); }
+    finally { try { lock.releaseLock(); } catch (x) {} }
+  }
   if (q === 'probarfoto') {
     try { return json_({ok: true, carpeta: carpeta_().getUrl()}); }
     catch (err) { return json_({ok: false, error: String(err.message || err)}); }
   }
   return json_({ok: true, servicio: 'Campo PDP Balones', hora: new Date().toISOString()});
+}
+
+
+/* ====================== Exportación a shapefiles para QGIS ======================
+   Lee las pestañas POZO, IMBORNAL y VERTIDO de la hoja (sin los ANULADOS) y deja en la carpeta
+   «Exportacion QGIS» (junto a la hoja) tres shapefiles en ETRS89 / UTM 30N, más un ZIP con ellos.
+   Se lanza desde el menú «Campo PDP» de la hoja o desde la app (Más > Exportar a Drive). */
+var CARPETA_EXPORT = 'Exportacion QGIS';
+var SHP_ARCHIVO = {POZO: 'POZOS', IMBORNAL: 'IMBORNALES', VERTIDO: 'VERTIDOS'};
+var SHP_COLS = {
+  red: 'RED', tipo: 'TIPO', material: 'MATERIAL', forma_tapa: 'FORMA_TAPA', d_tapa_cm: 'D_TAPA_CM', prof_solera_m: 'PROF_SOL_M', estado: 'ESTADO',
+  sedimentos_pct: 'SEDIM_PCT', accesible: 'ACCESIBLE', patologias: 'PATOLOG', resalto: 'RESALTO', prof_resalto_m: 'PROF_RES_M', alivio: 'ALIVIO',
+  destino_alivio: 'DEST_ALIV', acometidas: 'ACOMET', imbornales_conectados: 'IMB_CONECT', observaciones: 'OBSERV',
+  tipo_imbornal: 'TIPO_IMB', largo_reja_cm: 'LARGO_CM', ancho_reja_cm: 'ANCHO_CM', material_reja: 'MAT_REJA', sifonico: 'SIFONICO', obstruccion: 'OBSTRUC',
+  conectado_a: 'CONECT_A', d_conexion_mm: 'D_CONEX_MM', prof_m: 'PROF_M',
+  tipo_red: 'TIPO_RED', estructura: 'ESTRUCT', d_mm: 'D_MM', destino: 'DESTINO', cauce: 'CAUCE', resguardo_m: 'RESGUARD_M', caudal: 'CAUDAL', evidencias: 'EVIDENC'
+};
+var ATTR_NUM = {d_tapa_cm: 1, prof_solera_m: 1, sedimentos_pct: 1, prof_resalto_m: 1, acometidas: 1, imbornales_conectados: 1, largo_reja_cm: 1,
+  ancho_reja_cm: 1, d_conexion_mm: 1, prof_m: 1, d_mm: 1, resguardo_m: 1};
+var MAX_FOTOS_COL = 5;
+var PRJ_25830 = 'PROJCS["ETRS89 / UTM zone 30N",GEOGCS["ETRS89",DATUM["European_Terrestrial_Reference_System_1989",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-3],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]';
+
+function utm30_(lat, lon) {
+  var a = 6378137, f = 1 / 298.257222101, k0 = 0.9996, n = f / (2 - f), r = Math.PI / 180;
+  var A = a / (1 + n) * (1 + n * n / 4 + n * n * n * n / 64);
+  var al = [n / 2 - 2 * n * n / 3 + 5 * n * n * n / 16, 13 * n * n / 48 - 3 * n * n * n / 5, 61 * n * n * n / 240];
+  var phi = lat * r, lam = (lon + 3) * r, sp = Math.sin(phi), q = 2 * Math.sqrt(n) / (1 + n);
+  var atanh = function (x) { return 0.5 * Math.log((1 + x) / (1 - x)); };
+  var t = Math.sinh(atanh(sp) - q * atanh(q * sp));
+  var xi0 = Math.atan2(t, Math.cos(lam)), eta0 = atanh(Math.sin(lam) / Math.sqrt(1 + t * t));
+  var xi = xi0, eta = eta0;
+  for (var j = 1; j <= 3; j++) {
+    xi += al[j - 1] * Math.sin(2 * j * xi0) * Math.cosh(2 * j * eta0);
+    eta += al[j - 1] * Math.cos(2 * j * xi0) * Math.sinh(2 * j * eta0);
+  }
+  return {x: 500000 + k0 * A * eta, y: k0 * A * xi};
+}
+function utf8_(txt) {
+  var b = Utilities.newBlob(String(txt == null ? '' : txt), 'text/plain').getBytes(), o = [];
+  for (var i = 0; i < b.length; i++) o.push(b[i] & 255);
+  return o;
+}
+function cortar_(txt, max) {
+  var t = String(txt == null ? '' : txt);
+  var b = utf8_(t);
+  while (b.length > max) { t = t.slice(0, -1); b = utf8_(t); }
+  return b;
+}
+function aBlob_(u8, nombre) {
+  var s = [];
+  for (var i = 0; i < u8.length; i++) s.push(u8[i] > 127 ? u8[i] - 256 : u8[i]);
+  return Utilities.newBlob(s, 'application/octet-stream', nombre);
+}
+function dbf_(campos, filas) {
+  var nf = campos.length, hl = 32 + 32 * nf + 1, rl = 1, i, k;
+  campos.forEach(function (c) { rl += c.len; });
+  var out = new Uint8Array(hl + rl * filas.length + 1), dv = new DataView(out.buffer), d = new Date();
+  out[0] = 3; out[1] = d.getFullYear() - 1900; out[2] = d.getMonth() + 1; out[3] = d.getDate();
+  dv.setUint32(4, filas.length, true); dv.setUint16(8, hl, true); dv.setUint16(10, rl, true);
+  campos.forEach(function (c, i2) {
+    var o = 32 + 32 * i2, nb = utf8_(c.n).slice(0, 10);
+    for (var q = 0; q < nb.length; q++) out[o + q] = nb[q];
+    out[o + 11] = c.t.charCodeAt(0); out[o + 16] = c.len; out[o + 17] = c.dec || 0;
+  });
+  out[hl - 1] = 0x0D;
+  filas.forEach(function (fila, kk) {
+    var o = hl + rl * kk; out[o++] = 0x20;
+    campos.forEach(function (c, ii) {
+      var j;
+      for (j = 0; j < c.len; j++) out[o + j] = 0x20;
+      var v = fila[ii];
+      if (c.t === 'N') {
+        if (v !== null && v !== undefined && v !== '' && isFinite(v)) {
+          var t = Number(v).toFixed(c.dec || 0);
+          if (t.length > c.len) t = t.slice(0, c.len);
+          for (j = 0; j < t.length; j++) out[o + c.len - t.length + j] = t.charCodeAt(j);
+        }
+      } else {
+        var bb = cortar_(v, c.len);
+        for (j = 0; j < bb.length; j++) out[o + j] = bb[j];
+      }
+      o += c.len;
+    });
+  });
+  out[out.length - 1] = 0x1A;
+  return out;
+}
+function shp_(pts) {
+  var n = pts.length, len = 100 + 28 * n, shp = new Uint8Array(len), shx = new Uint8Array(100 + 8 * n);
+  var a = new DataView(shp.buffer), b = new DataView(shx.buffer);
+  var xs = pts.map(function (p) { return p.x; }), ys = pts.map(function (p) { return p.y; });
+  var mnx = Math.min.apply(null, xs), mny = Math.min.apply(null, ys), mxx = Math.max.apply(null, xs), mxy = Math.max.apply(null, ys);
+  [a, b].forEach(function (dv, i) {
+    dv.setInt32(0, 9994, false); dv.setInt32(24, (i ? 100 + 8 * n : len) / 2, false); dv.setInt32(28, 1000, true); dv.setInt32(32, 1, true);
+    dv.setFloat64(36, mnx, true); dv.setFloat64(44, mny, true); dv.setFloat64(52, mxx, true); dv.setFloat64(60, mxy, true);
+  });
+  pts.forEach(function (p, i) {
+    var o = 100 + 28 * i;
+    a.setInt32(o, i + 1, false); a.setInt32(o + 4, 10, false); a.setInt32(o + 8, 1, true); a.setFloat64(o + 12, p.x, true); a.setFloat64(o + 20, p.y, true);
+    b.setInt32(100 + 8 * i, o / 2, false); b.setInt32(104 + 8 * i, 10, false);
+  });
+  return {shp: shp, shx: shx};
+}
+
+function carpetaExport_() {
+  var f = DriveApp.getFileById(SpreadsheetApp.getActive().getId());
+  var padres = f.getParents();
+  var padre = padres.hasNext() ? padres.next() : DriveApp.getRootFolder();
+  var it = padre.getFoldersByName(CARPETA_EXPORT);
+  return it.hasNext() ? it.next() : padre.createFolder(CARPETA_EXPORT);
+}
+function urlsFotos_() {
+  var m = {}, it = carpeta_().getFiles();
+  while (it.hasNext()) { var f = it.next(); m[f.getName()] = f.getUrl(); }
+  return m;
+}
+function texto_(v) {
+  if (Object.prototype.toString.call(v) === '[object Date]') return Utilities.formatDate(v, Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm:ss');
+  return v === null || v === undefined ? '' : String(v);
+}
+function num_(v) { return v === '' || v === null || v === undefined || !isFinite(v) ? '' : Number(v); }
+
+/* Devuelve {carpeta, zip, puntos:{POZOS:n,...}} */
+function exportarQgis() {
+  var ss = SpreadsheetApp.getActive(), carp = carpetaExport_(), urls = urlsFotos_();
+  var ficheros = [], resumen = {};
+  Object.keys(SHP_ARCHIVO).forEach(function (capa) {
+    var h = ss.getSheetByName(capa);
+    if (!h || h.getLastRow() < 2) return;
+    var v = h.getDataRange().getValues(), cab = v[0], idx = {};
+    cab.forEach(function (c, i) { idx[c] = i; });
+    var get = function (r, k) { return idx[k] === undefined ? '' : r[idx[k]]; };
+    var filas = v.slice(1).filter(function (r) {
+      return get(r, 'estado_registro') !== 'ANULADO' && isFinite(get(r, 'lat')) && get(r, 'lat') !== '' && isFinite(get(r, 'lon')) && get(r, 'lon') !== '';
+    });
+    if (!filas.length) return;
+    var attrs = ATTR[capa];
+    var campos = [{n: 'ID', t: 'C', len: 24}, {n: 'CAPA', t: 'C', len: 12}, {n: 'USUARIO', t: 'C', len: 6}, {n: 'FECHA', t: 'C', len: 19},
+      {n: 'LAT', t: 'N', len: 14, dec: 8}, {n: 'LON', t: 'N', len: 14, dec: 8}, {n: 'X_UTM', t: 'N', len: 14, dec: 3}, {n: 'Y_UTM', t: 'N', len: 14, dec: 3},
+      {n: 'LECTURAS', t: 'N', len: 5}, {n: 'DURACION_S', t: 'N', len: 4}, {n: 'DISP_M', t: 'N', len: 8, dec: 2}, {n: 'PREC_M', t: 'N', len: 8, dec: 1},
+      {n: 'COTA_GPS', t: 'N', len: 9, dec: 1}, {n: 'CALIDAD', t: 'C', len: 80}, {n: 'REF', t: 'C', len: 48}, {n: 'REF_DIST_M', t: 'N', len: 8, dec: 1}];
+    attrs.forEach(function (k) {
+      var num = !!ATTR_NUM[k];
+      campos.push({n: SHP_COLS[k] || k.slice(0, 10).toUpperCase(), t: num ? 'N' : 'C',
+        len: num ? 12 : (k === 'observaciones' ? 254 : (k === 'patologias' || k === 'evidencias' ? 120 : 40)), dec: num ? 3 : 0});
+    });
+    if (capa === 'POZO') campos.push({n: 'N_ENTR', t: 'N', len: 3}, {n: 'N_SAL', t: 'N', len: 3}, {n: 'CONDUCTOS', t: 'C', len: 254});
+    campos.push({n: 'N_FOTOS', t: 'N', len: 3});
+    var i;
+    for (i = 1; i <= MAX_FOTOS_COL; i++) campos.push({n: 'FOTO_' + i, t: 'C', len: 64});
+    for (i = 1; i <= MAX_FOTOS_COL; i++) campos.push({n: 'URL_' + i, t: 'C', len: 100});
+    var geos = [];
+    var datos = filas.map(function (r) {
+      var lat = Number(get(r, 'lat')), lon = Number(get(r, 'lon')), u = utm30_(lat, lon);
+      geos.push(u);
+      var fila = [texto_(get(r, 'id_elemento')), capa, texto_(get(r, 'usuario')), texto_(get(r, 'fecha_hora')), lat, lon, u.x, u.y,
+        num_(get(r, 'lecturas')), num_(get(r, 'duracion_s')), num_(get(r, 'dispersion_m')), num_(get(r, 'precision_gps_m')), num_(get(r, 'cota_gps_m')),
+        texto_(get(r, 'calidad')), texto_(get(r, 'ref_id')), num_(get(r, 'ref_dist_m'))];
+      attrs.forEach(function (k) { fila.push(ATTR_NUM[k] ? num_(get(r, k)) : texto_(get(r, k))); });
+      if (capa === 'POZO') fila.push(num_(get(r, 'n_entradas')), num_(get(r, 'n_salidas')), texto_(get(r, 'conductos')));
+      var nombres = texto_(get(r, 'fotos')).split(' | ').filter(function (x) { return x; });
+      fila.push(nombres.length);
+      for (var q = 0; q < MAX_FOTOS_COL; q++) fila.push(nombres[q] || '');
+      for (q = 0; q < MAX_FOTOS_COL; q++) fila.push(nombres[q] ? (urls[nombres[q]] || '') : '');
+      return fila;
+    });
+    var nom = SHP_ARCHIVO[capa], g = shp_(geos);
+    ficheros.push(aBlob_(g.shp, nom + '.shp'), aBlob_(g.shx, nom + '.shx'), aBlob_(dbf_(campos, datos), nom + '.dbf'),
+      Utilities.newBlob(PRJ_25830, 'text/plain', nom + '.prj'), Utilities.newBlob('UTF-8', 'text/plain', nom + '.cpg'));
+    resumen[nom] = filas.length;
+  });
+  if (!ficheros.length) return {carpeta: carp.getUrl(), zip: '', puntos: {}};
+  ficheros.push(Utilities.newBlob(
+    'Puntos tomados con Campo PDP Balones.\r\nSistema de referencia: ETRS89 / UTM 30N (EPSG:25830).\r\n' +
+    'FOTO_1..FOTO_5: nombre del archivo en la carpeta de fotos de Drive. URL_1..URL_5: enlace a la foto en Drive.\r\n' +
+    'Generado: ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm') + '\r\n', 'text/plain', 'LEEME.txt'));
+  var zip = Utilities.zip(ficheros.map(function (b) { return b.copyBlob().setName(b.getName()); }), 'Exportacion_QGIS.zip');
+  ficheros.concat([zip]).forEach(function (b) {
+    var it = carp.getFilesByName(b.getName());
+    while (it.hasNext()) it.next().setTrashed(true);
+    carp.createFile(b);
+  });
+  return {carpeta: carp.getUrl(), zip: carp.getFilesByName('Exportacion_QGIS.zip').next().getUrl(), puntos: resumen};
+}
+
+function onOpen() {
+  try {
+    SpreadsheetApp.getUi().createMenu('Campo PDP').addItem('Exportar a QGIS (shapefiles en Drive)', 'exportarDesdeMenu').addToUi();
+  } catch (e) {}
+}
+function exportarDesdeMenu() {
+  var r = exportarQgis(), ui = SpreadsheetApp.getUi();
+  var n = Object.keys(r.puntos).map(function (k) { return r.puntos[k] + ' ' + k.toLowerCase(); }).join(', ');
+  ui.alert(n ? 'Exportado: ' + n + '.\nCarpeta: ' + r.carpeta : 'No hay puntos vigentes que exportar.');
 }
