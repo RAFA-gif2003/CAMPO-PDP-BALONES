@@ -48,3 +48,7 @@ Pestañas `POZO`, `Fotos` y `Dominios` (se crean solas al primer envío). Cada f
 - Responsable (con PIN): duración de la toma de 5 a 30 s en ese móvil, y borrar puntos de ese móvil. Cada punto guarda la duración usada (`duracion_s`).
 - Subcuencas: solo las del PDP 2026.
 - Al actualizar el script, edita la implementación con «Nueva versión». Las listas nuevas se añaden solas a la pestaña `Dominios`.
+
+## Exportar a QGIS (v1.8)
+
+Más > SHP genera un ZIP con `POZOS`, `IMBORNALES` y `VERTIDOS` (ETRS89 / UTM 30N, con UTF-8), una carpeta `fotos` con las imágenes y un `LEEME.txt`. Los puntos anulados no se exportan. Las columnas `FOTO_1` a `FOTO_5` llevan la ruta relativa `fotos/<nombre>.jpg`.

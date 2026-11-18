@@ -201,6 +201,10 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
   <div class="grupo">Mapa sin cobertura</div>
   <div class="fila"><label>Descargar el mapa base del casco (PNOA e IGN Base)</label><button id="btnTeselas" class="b sec" type="button" style="height:44px">Descargar</button></div>
   <div id="teselasInfo" class="muted" style="padding:4px 0"></div>
+  <div class="grupo">Para QGIS</div>
+  <div class="fila"><label>Exportar los puntos a SHP (pozos, imbornales y vertidos) con las fotos</label><button id="btnShp" class="b sec" type="button" style="height:44px">SHP</button></div>
+  <div class="fila"><input type="checkbox" id="shpFotos" checked><label for="shpFotos">Incluir las fotos en el ZIP</label></div>
+  <div id="shpInfo" class="muted" style="padding:4px 0"></div>
   <div class="grupo">Copia de seguridad</div>
   <div class="fila"><label>Descargar los puntos de este móvil (CSV)</label><button id="btnCsv" class="b sec" type="button" style="height:44px">CSV</button></div>
   <div class="grupo">Responsable</div>
@@ -270,7 +274,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.7';
+const VERSION = '1.8';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR_MAX = 30;                                 // duración normal de la toma (s)
 let durActual = DUR_MAX;
@@ -1218,6 +1222,148 @@ function csvPuntos(){
   const txt = '\ufeff' + [cab].concat(filas).map(f => f.map(q).join(';')).join('\r\n');
   descargar(new Blob([txt], {type:'text/csv;charset=utf-8'}), 'puntos_' + siglas() + '_' + sello(new Date()) + '.csv');
 }
+/* ====================== exportación a SHP (ETRS89 / UTM 30N) ====================== */
+const SHP_COLS = {
+  red:'RED', tipo:'TIPO', material:'MATERIAL', forma_tapa:'FORMA_TAPA', d_tapa_cm:'D_TAPA_CM', prof_solera_m:'PROF_SOL_M', estado:'ESTADO',
+  sedimentos_pct:'SEDIM_PCT', accesible:'ACCESIBLE', patologias:'PATOLOG', resalto:'RESALTO', prof_resalto_m:'PROF_RES_M', alivio:'ALIVIO',
+  destino_alivio:'DEST_ALIV', acometidas:'ACOMET', imbornales_conectados:'IMB_CONECT', observaciones:'OBSERV',
+  tipo_imbornal:'TIPO_IMB', largo_reja_cm:'LARGO_CM', ancho_reja_cm:'ANCHO_CM', material_reja:'MAT_REJA', sifonico:'SIFONICO', obstruccion:'OBSTRUC',
+  conectado_a:'CONECT_A', d_conexion_mm:'D_CONEX_MM', prof_m:'PROF_M',
+  tipo_red:'TIPO_RED', estructura:'ESTRUCT', d_mm:'D_MM', destino:'DESTINO', cauce:'CAUCE', resguardo_m:'RESGUARD_M', caudal:'CAUDAL', evidencias:'EVIDENC'
+};
+const SHP_ARCHIVO = {POZO:'POZOS', IMBORNAL:'IMBORNALES', VERTIDO:'VERTIDOS'};
+const MAX_FOTOS_COL = 5;
+function utm30(lat, lon){                        // ETRS89 (GRS80) → UTM 30N, series de Krüger
+  const a = 6378137, f = 1 / 298.257222101, k0 = 0.9996, n = f / (2 - f), r = Math.PI / 180;
+  const A = a / (1 + n) * (1 + n*n/4 + n*n*n*n/64);
+  const al = [n/2 - 2*n*n/3 + 5*n*n*n/16, 13*n*n/48 - 3*n*n*n/5, 61*n*n*n/240];
+  const phi = lat * r, lam = (lon + 3) * r, sp = Math.sin(phi), q = 2 * Math.sqrt(n) / (1 + n);
+  const atanh = x => 0.5 * Math.log((1 + x) / (1 - x));
+  const t = Math.sinh(atanh(sp) - q * atanh(q * sp));
+  const xi0 = Math.atan2(t, Math.cos(lam)), eta0 = atanh(Math.sin(lam) / Math.sqrt(1 + t*t));
+  let xi = xi0, eta = eta0;
+  for (let j = 1; j <= 3; j++){ xi += al[j-1] * Math.sin(2*j*xi0) * Math.cosh(2*j*eta0); eta += al[j-1] * Math.cos(2*j*xi0) * Math.sinh(2*j*eta0); }
+  return {x: 500000 + k0 * A * eta, y: k0 * A * xi};
+}
+const enc8 = new TextEncoder();
+function cortarBytes(txt, max){
+  let t = String(txt == null ? '' : txt);
+  while (enc8.encode(t).length > max) t = t.slice(0, -1);
+  return enc8.encode(t);
+}
+function dbfBytes(campos, filas){
+  const nf = campos.length, hl = 32 + 32 * nf + 1, rl = 1 + campos.reduce((a, c) => a + c.len, 0);
+  const out = new Uint8Array(hl + rl * filas.length + 1), dv = new DataView(out.buffer), d = new Date();
+  out[0] = 3; out[1] = d.getFullYear() - 1900; out[2] = d.getMonth() + 1; out[3] = d.getDate();
+  dv.setUint32(4, filas.length, true); dv.setUint16(8, hl, true); dv.setUint16(10, rl, true);
+  campos.forEach((c, i) => {
+    const o = 32 + 32 * i; out.set(enc8.encode(c.n).slice(0, 10), o);
+    out[o + 11] = c.t.charCodeAt(0); out[o + 16] = c.len; out[o + 17] = c.dec || 0;
+  });
+  out[hl - 1] = 0x0D;
+  filas.forEach((fila, k) => {
+    let o = hl + rl * k; out[o++] = 0x20;
+    campos.forEach((c, i) => {
+      out.fill(0x20, o, o + c.len);
+      const v = fila[i];
+      if (c.t === 'N'){
+        if (v != null && v !== '' && isFinite(v)){ let t = Number(v).toFixed(c.dec || 0); if (t.length > c.len) t = t.slice(0, c.len); out.set(enc8.encode(t), o + c.len - t.length); }
+      } else out.set(cortarBytes(v, c.len), o);
+      o += c.len;
+    });
+  });
+  out[out.length - 1] = 0x1A;
+  return out;
+}
+function shpBytes(pts){                          // pts: [{x,y}] tipo Point
+  const n = pts.length, len = 100 + 28 * n, shp = new Uint8Array(len), shx = new Uint8Array(100 + 8 * n);
+  const a = new DataView(shp.buffer), b = new DataView(shx.buffer);
+  const xs = pts.map(p => p.x), ys = pts.map(p => p.y);
+  [a, b].forEach((dv, i) => {
+    dv.setInt32(0, 9994, false); dv.setInt32(24, (i ? 100 + 8 * n : len) / 2, false); dv.setInt32(28, 1000, true); dv.setInt32(32, 1, true);
+    dv.setFloat64(36, Math.min.apply(null, xs), true); dv.setFloat64(44, Math.min.apply(null, ys), true);
+    dv.setFloat64(52, Math.max.apply(null, xs), true); dv.setFloat64(60, Math.max.apply(null, ys), true);
+  });
+  pts.forEach((p, i) => {
+    const o = 100 + 28 * i;
+    a.setInt32(o, i + 1, false); a.setInt32(o + 4, 10, false); a.setInt32(o + 8, 1, true); a.setFloat64(o + 12, p.x, true); a.setFloat64(o + 20, p.y, true);
+    b.setInt32(100 + 8 * i, o / 2, false); b.setInt32(104 + 8 * i, 10, false);
+  });
+  return {shp, shx};
+}
+const CRC_T = (() => { const t = []; for (let n = 0; n < 256; n++){ let c = n; for (let k = 0; k < 8; k++) c = c & 1 ? 0xEDB88320 ^ (c >>> 1) : c >>> 1; t[n] = c >>> 0; } return t; })();
+function crc32(u){ let c = 0xFFFFFFFF; for (let i = 0; i < u.length; i++) c = CRC_T[(c ^ u[i]) & 0xFF] ^ (c >>> 8); return (c ^ 0xFFFFFFFF) >>> 0; }
+function zipBlob(ficheros){                      // sin compresión (las fotos ya son JPEG)
+  const d = new Date(), dt = (d.getHours() << 11) | (d.getMinutes() << 5) | (d.getSeconds() >> 1), dd2 = ((d.getFullYear() - 1980) << 9) | ((d.getMonth() + 1) << 5) | d.getDate();
+  const partes = [], central = []; let off = 0;
+  ficheros.forEach(f => {
+    const nm = enc8.encode(f.name), crc = crc32(f.data), h = new DataView(new ArrayBuffer(30));
+    h.setUint32(0, 0x04034b50, true); h.setUint16(4, 20, true); h.setUint16(6, 0x0800, true); h.setUint16(8, 0, true);
+    h.setUint16(10, dt, true); h.setUint16(12, dd2, true); h.setUint32(14, crc, true); h.setUint32(18, f.data.length, true); h.setUint32(22, f.data.length, true); h.setUint16(26, nm.length, true);
+    partes.push(new Uint8Array(h.buffer), nm, f.data);
+    const c = new DataView(new ArrayBuffer(46));
+    c.setUint32(0, 0x02014b50, true); c.setUint16(4, 20, true); c.setUint16(6, 20, true); c.setUint16(8, 0x0800, true); c.setUint16(10, 0, true);
+    c.setUint16(12, dt, true); c.setUint16(14, dd2, true); c.setUint32(16, crc, true); c.setUint32(20, f.data.length, true); c.setUint32(24, f.data.length, true); c.setUint16(28, nm.length, true); c.setUint32(42, off, true);
+    central.push(new Uint8Array(c.buffer), nm);
+    off += 30 + nm.length + f.data.length;
+  });
+  const tam = central.reduce((a, x) => a + x.length, 0), e = new DataView(new ArrayBuffer(22));
+  e.setUint32(0, 0x06054b50, true); e.setUint16(8, ficheros.length, true); e.setUint16(10, ficheros.length, true); e.setUint32(12, tam, true); e.setUint32(16, off, true);
+  return new Blob(partes.concat(central, [new Uint8Array(e.buffer)]), {type:'application/zip'});
+}
+const PRJ_25830 = 'PROJCS["ETRS89 / UTM zone 30N",GEOGCS["ETRS89",DATUM["European_Terrestrial_Reference_System_1989",SPHEROID["GRS 1980",6378137,298.257222101]],PRIMEM["Greenwich",0],UNIT["degree",0.0174532925199433]],PROJECTION["Transverse_Mercator"],PARAMETER["latitude_of_origin",0],PARAMETER["central_meridian",-3],PARAMETER["scale_factor",0.9996],PARAMETER["false_easting",500000],PARAMETER["false_northing",0],UNIT["metre",1]]';
+async function exportarShp(){
+  const info = $('shpInfo');
+  const tom = lsArr(K.tom).filter(t => !t.anulado && isFinite(t.lat) && isFinite(t.lon) && ELEMENTOS[t.capa]);
+  if (!tom.length){ info.textContent = 'No hay puntos vigentes que exportar.'; return; }
+  info.textContent = 'Preparando…'; $('btnShp').disabled = true;
+  try {
+    const ficheros = [], resumen = [], conFotos = $('shpFotos').checked, usadas = {};
+    for (const capa of Object.keys(SHP_ARCHIVO)){
+      const pts = tom.filter(t => t.capa === capa); if (!pts.length) continue;
+      const el = ELEMENTOS[capa];
+      const campos = [{n:'ID',t:'C',len:24},{n:'CAPA',t:'C',len:12},{n:'USUARIO',t:'C',len:6},{n:'FECHA',t:'C',len:19},
+        {n:'LAT',t:'N',len:14,dec:8},{n:'LON',t:'N',len:14,dec:8},{n:'X_UTM',t:'N',len:14,dec:3},{n:'Y_UTM',t:'N',len:14,dec:3},
+        {n:'LECTURAS',t:'N',len:5},{n:'DURACION_S',t:'N',len:4},{n:'DISP_M',t:'N',len:8,dec:2},{n:'PREC_M',t:'N',len:8,dec:1},{n:'COTA_GPS',t:'N',len:9,dec:1},
+        {n:'CALIDAD',t:'C',len:80},{n:'REF',t:'C',len:48},{n:'REF_DIST_M',t:'N',len:8,dec:1},{n:'ENVIADO',t:'C',len:2}];
+      el.campos.forEach(c => campos.push({n:SHP_COLS[c.k] || c.k.slice(0, 10).toUpperCase(), t:c.t === 'num' ? 'N' : 'C', len:c.t === 'num' ? 12 : c.t === 'txt' ? 254 : c.t === 'multi' ? 120 : 40, dec:c.t === 'num' ? 3 : 0}));
+      if (el.cond) campos.push({n:'N_ENTR',t:'N',len:3},{n:'N_SAL',t:'N',len:3},{n:'CONDUCTOS',t:'C',len:254});
+      campos.push({n:'N_FOTOS',t:'N',len:3});
+      for (let i = 1; i <= MAX_FOTOS_COL; i++) campos.push({n:'FOTO_' + i, t:'C', len:90});
+      campos.push({n:'FOTOS_MAS', t:'C', len:254});
+      const geos = [], filas = pts.map(t => {
+        const u = utm30(t.lat, t.lon); geos.push(u);
+        const a = t.attr || {}, cd = t.cond || [], fts = (t.fotos || []).slice();
+        const fila = [t.cid, t.capa, t.usuario, t.hora, t.lat, t.lon, u.x, u.y, t.lecturas, t.dur, t.disp, t.prec, t.cota, t.calidad, t.ref, t.refDist, t.enviado ? 'si' : 'no'];
+        el.campos.forEach(c => { const v = a[c.k]; fila.push(Array.isArray(v) ? v.join('; ') : v); });
+        if (el.cond){
+          fila.push(cd.filter(c => c.s === 'E').length, cd.filter(c => c.s === 'S').length,
+            cd.map(c => (c.s === 'E' ? 'E' : 'S') + ' Ø' + (c.d == null ? '' : c.d) + ' ' + c.m + ' p' + (c.p == null ? '' : c.p)).join(' | '));
+        }
+        fila.push(fts.length);
+        for (let i = 0; i < MAX_FOTOS_COL; i++) fila.push(fts[i] ? 'fotos/' + fts[i] : '');
+        fila.push(fts.slice(MAX_FOTOS_COL).map(n => 'fotos/' + n).join(' ; '));
+        fts.forEach(n => { usadas[n] = true; });
+        return fila;
+      });
+      const nom = SHP_ARCHIVO[capa], g = shpBytes(geos);
+      ficheros.push({name:nom + '.shp', data:g.shp}, {name:nom + '.shx', data:g.shx}, {name:nom + '.dbf', data:dbfBytes(campos, filas)},
+        {name:nom + '.prj', data:enc8.encode(PRJ_25830)}, {name:nom + '.cpg', data:enc8.encode('UTF-8')});
+      resumen.push(pts.length + ' ' + nom.toLowerCase());
+    }
+    let nFotos = 0, faltan = 0;
+    if (conFotos){
+      for (const n of Object.keys(usadas)){
+        const r = await bdGet(n);
+        if (r && r.blob){ ficheros.push({name:'fotos/' + n, data:new Uint8Array(await r.blob.arrayBuffer())}); nFotos++; } else faltan++;
+      }
+    }
+    ficheros.push({name:'LEEME.txt', data:enc8.encode('Puntos tomados con Campo PDP Balones (' + siglas() + ').\r\nSistema de referencia: ETRS89 / UTM 30N (EPSG:25830).\r\nLas columnas FOTO_1 a FOTO_5 llevan la ruta relativa a la carpeta fotos.\r\nDescomprime todo el ZIP en una carpeta antes de abrirlo en QGIS.\r\n')});
+    descargar(zipBlob(ficheros), 'puntos_' + siglas() + '_' + sello(new Date()) + '.zip');
+    info.textContent = 'Exportado: ' + resumen.join(', ') + (conFotos ? '; ' + nFotos + ' fotos' + (faltan ? ' (' + faltan + ' no están ya en este móvil)' : '') : '; sin fotos') + '. Se han dejado fuera los puntos anulados.';
+  } catch(err){ info.textContent = 'No se pudo exportar: ' + err.message; logErr('shp: ' + err.message); }
+  finally { $('btnShp').disabled = false; }
+}
 /* teselas del casco para trabajar sin cobertura */
 function xyz(lat, lon, z){
   const n = Math.pow(2, z), r = lat * Math.PI / 180;
@@ -1302,6 +1448,7 @@ function conectarBotones(){
   $('btnSync').addEventListener('click', () => { sincronizar(); subirFotos(); });
   $('btnTeselas').addEventListener('click', descargarTeselas);
   $('btnCsv').addEventListener('click', csvPuntos);
+  $('btnShp').addEventListener('click', exportarShp);
   $('pMas').addEventListener('click', e => {
     const id = e.target && e.target.id;
     if (id === 'btnInstalar' && promptInst){ promptInst.prompt(); promptInst.userChoice.then(() => { promptInst = null; pintarInstalar(); }).catch(() => {}); }
