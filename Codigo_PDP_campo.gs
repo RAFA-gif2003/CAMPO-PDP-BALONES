@@ -463,16 +463,157 @@ function exportarQgis() {
     while (it.hasNext()) it.next().setTrashed(true);
     carp.createFile(b);
   });
-  return {carpeta: carp.getUrl(), zip: carp.getFilesByName('Exportacion_QGIS.zip').next().getUrl(), puntos: resumen};
+  var kml = {};
+  try { kml = exportarKml_(carp); } catch (errK) { kml = {error: String(errK && errK.message || errK)}; }
+  return {carpeta: carp.getUrl(), zip: carp.getFilesByName('Exportacion_QGIS.zip').next().getUrl(), puntos: resumen, kml: kml};
+}
+
+/* ====================== Exportación a KMZ / KML (Google Earth, Mis mapas) ======================
+   Se genera junto a los shapefiles, en la misma carpeta «Exportacion QGIS»:
+   - Puntos_PDP_Balones.kmz: un solo archivo con las fotos DENTRO (se ven al pinchar sin depender de Drive).
+     Si las fotos suman más de KMZ_MAX_MB, las que no caben quedan como enlace a Drive.
+   - Puntos_PDP_Balones_enlaces.kml: ligero, con enlaces a las fotos en Drive. Las fotos solo se ven en
+     el globo para quien tenga acceso a la carpeta de fotos; el script NO cambia nunca los permisos de Drive. */
+var KMZ_MAX_MB = 40;
+var KML_ESTILOS = {
+  POZO:     {color: 'ffb4781f', icono: 'https://maps.google.com/mapfiles/kml/shapes/placemark_circle.png', carpeta: 'Pozos'},
+  IMBORNAL: {color: 'ff007fff', icono: 'https://maps.google.com/mapfiles/kml/shapes/triangle.png', carpeta: 'Imbornales'},
+  VERTIDO:  {color: 'ff1c1ae3', icono: 'https://maps.google.com/mapfiles/kml/shapes/placemark_square.png', carpeta: 'Puntos de vertido'}
+};
+var KML_ETIQ = {
+  red: 'Red', tipo: 'Tipo', material: 'Material', forma_tapa: 'Forma de tapa', d_tapa_cm: 'Diámetro tapa (cm)', prof_solera_m: 'Prof. solera (m)',
+  estado: 'Estado', sedimentos_pct: 'Sedimentos (%)', accesible: 'Accesible', patologias: 'Patologías', resalto: 'Resalto', prof_resalto_m: 'Prof. resalto (m)',
+  alivio: 'Alivio', destino_alivio: 'Destino alivio', acometidas: 'Acometidas', imbornales_conectados: 'Imbornales conectados', observaciones: 'Observaciones',
+  tipo_imbornal: 'Tipo', largo_reja_cm: 'Largo reja (cm)', ancho_reja_cm: 'Ancho reja (cm)', material_reja: 'Material reja', sifonico: 'Sifónico',
+  obstruccion: 'Obstrucción', conectado_a: 'Conectado a', d_conexion_mm: 'Ø conexión (mm)', prof_m: 'Profundidad (m)',
+  tipo_red: 'Tipo de red', estructura: 'Estructura', d_mm: 'Ø (mm)', destino: 'Destino', cauce: 'Cauce', resguardo_m: 'Resguardo (m)', caudal: 'Caudal', evidencias: 'Evidencias'
+};
+function esc_(s) {
+  return String(s === null || s === undefined ? '' : s).replace(/[\x00-\x08\x0b\x0c\x0e-\x1f]/g, '')
+    .replace(/&/g, '&amp;').replace(/</g, '&lt;').replace(/>/g, '&gt;').replace(/"/g, '&quot;');
+}
+function archivosFotos_() {
+  var m = {}, it = carpeta_().getFiles();
+  while (it.hasNext()) { var f = it.next(); m[f.getName()] = f; }
+  return m;
+}
+/* Puntos vigentes de las tres pestañas, con sus atributos ya en texto. */
+function puntosKml_() {
+  var ss = SpreadsheetApp.getActive(), out = [];
+  Object.keys(SHP_ARCHIVO).forEach(function (capa) {
+    var h = ss.getSheetByName(capa);
+    if (!h || h.getLastRow() < 2) return;
+    var v = h.getDataRange().getValues(), cab = v[0], idx = {};
+    cab.forEach(function (c, i) { idx[c] = i; });
+    var get = function (r, k) { return idx[k] === undefined ? '' : r[idx[k]]; };
+    v.slice(1).forEach(function (r) {
+      if (get(r, 'estado_registro') === 'ANULADO') return;
+      var la = get(r, 'lat'), lo = get(r, 'lon');
+      if (la === '' || lo === '' || !isFinite(la) || !isFinite(lo)) return;
+      var attrs = [];
+      ATTR[capa].forEach(function (k) {
+        var t = texto_(get(r, k));
+        if (t !== '') attrs.push([KML_ETIQ[k] || k, t]);
+      });
+      if (capa === 'POZO') {
+        var c = texto_(get(r, 'conductos'));
+        if (c) attrs.push(['Conductos', c]);
+      }
+      out.push({
+        capa: capa, id: texto_(get(r, 'id_elemento')), lat: Number(la), lon: Number(lo), usuario: texto_(get(r, 'usuario')),
+        fecha: texto_(get(r, 'fecha_hora')), prec: texto_(get(r, 'precision_gps_m')), calidad: texto_(get(r, 'calidad')),
+        ref: texto_(get(r, 'ref_id')), attrs: attrs,
+        fotos: texto_(get(r, 'fotos')).split(' | ').filter(function (x) { return x; })
+      });
+    });
+  });
+  return out;
+}
+/* modo 'kmz': fotos incrustadas (mapa nombre->true) o enlace si no caben. modo 'enlaces': siempre enlace a Drive. */
+function kmlTexto_(puntos, modo, archivos, incrustadas) {
+  var x = ['<?xml version="1.0" encoding="UTF-8"?>',
+    '<kml xmlns="http://www.opengis.net/kml/2.2"><Document>',
+    '<name>Puntos PDP Balones</name>',
+    '<description>' + esc_('Puntos tomados con Campo PDP Balones. Generado: ' + Utilities.formatDate(new Date(), Session.getScriptTimeZone(), 'yyyy-MM-dd HH:mm')) + '</description>'];
+  Object.keys(KML_ESTILOS).forEach(function (k) {
+    var e = KML_ESTILOS[k];
+    x.push('<Style id="s' + k + '"><IconStyle><color>' + e.color + '</color><scale>1.1</scale><Icon><href>' + e.icono + '</href></Icon></IconStyle>' +
+      '<LabelStyle><scale>0.8</scale></LabelStyle></Style>');
+  });
+  Object.keys(KML_ESTILOS).forEach(function (capa) {
+    var lista = puntos.filter(function (p) { return p.capa === capa; });
+    if (!lista.length) return;
+    x.push('<Folder><name>' + esc_(KML_ESTILOS[capa].carpeta) + ' (' + lista.length + ')</name>');
+    lista.forEach(function (p) {
+      var d = '<h3>' + esc_(p.id) + '</h3><table border="1" cellpadding="3" cellspacing="0">';
+      var fila = function (a, b) { d += '<tr><td><b>' + esc_(a) + '</b></td><td>' + esc_(b) + '</td></tr>'; };
+      fila('Capa', KML_ESTILOS[capa].carpeta);
+      p.attrs.forEach(function (a) { fila(a[0], a[1]); });
+      fila('Fecha', p.fecha); fila('Usuario', p.usuario);
+      if (p.prec !== '') fila('Precisión GPS (m)', p.prec);
+      if (p.calidad) fila('Calidad', p.calidad);
+      if (p.ref) fila('Elemento de referencia', p.ref);
+      d += '</table>';
+      p.fotos.forEach(function (n) {
+        var f = archivos[n];
+        if (!f) { d += '<p>Foto ' + esc_(n) + ': no encontrada en la carpeta de fotos.</p>'; return; }
+        var enlace = 'https://drive.google.com/file/d/' + f.getId() + '/view';
+        if (modo === 'kmz' && incrustadas[n]) {
+          d += '<p><img src="files/' + esc_(encodeURIComponent(n)) + '" width="400"/><br/>' + esc_(n) + '</p>';
+        } else {
+          d += '<p><img src="https://drive.google.com/thumbnail?id=' + f.getId() + '&amp;sz=w800" width="400"/><br/>' +
+            '<a href="' + enlace + '">Abrir foto en Drive</a> · ' + esc_(n) + '</p>';
+        }
+      });
+      x.push('<Placemark><name>' + esc_(p.id) + '</name><styleUrl>#s' + capa + '</styleUrl>' +
+        '<description><![CDATA[' + d.replace(/\]\]>/g, ']]&gt;') + ']]></description>' +
+        '<Point><coordinates>' + p.lon.toFixed(8) + ',' + p.lat.toFixed(8) + ',0</coordinates></Point></Placemark>');
+    });
+    x.push('</Folder>');
+  });
+  x.push('</Document></kml>');
+  return x.join('\n');
+}
+function sustituirArchivo_(carp, blob) {
+  var it = carp.getFilesByName(blob.getName());
+  while (it.hasNext()) it.next().setTrashed(true);
+  return carp.createFile(blob);
+}
+/* Devuelve {kmz, kml, puntos, fotos_incrustadas, fotos_enlace, fotos_sin_archivo} */
+function exportarKml_(carp) {
+  var puntos = puntosKml_();
+  if (!puntos.length) return {puntos: 0};
+  var archivos = archivosFotos_(), incrustadas = {}, blobs = [], usado = 0, maxB = KMZ_MAX_MB * 1048576;
+  var nEnlace = 0, nSin = 0;
+  puntos.forEach(function (p) {
+    p.fotos.forEach(function (n) {
+      var f = archivos[n];
+      if (!f) { nSin++; return; }
+      if (incrustadas[n]) return;
+      var tam = f.getSize();
+      if (usado + tam > maxB) { nEnlace++; return; }
+      var b = f.getBlob();
+      blobs.push(b.copyBlob().setName('files/' + n));
+      incrustadas[n] = true; usado += tam;
+    });
+  });
+  var kmzBlobs = [Utilities.newBlob(kmlTexto_(puntos, 'kmz', archivos, incrustadas), 'application/vnd.google-earth.kml+xml', 'doc.kml')].concat(blobs);
+  var kmz = sustituirArchivo_(carp, Utilities.zip(kmzBlobs, 'Puntos_PDP_Balones.kmz'));
+  var kml = sustituirArchivo_(carp, Utilities.newBlob(kmlTexto_(puntos, 'enlaces', archivos, {}), 'application/vnd.google-earth.kml+xml', 'Puntos_PDP_Balones_enlaces.kml'));
+  return {kmz: kmz.getUrl(), kml: kml.getUrl(), puntos: puntos.length, fotos_incrustadas: Object.keys(incrustadas).length,
+    fotos_enlace: nEnlace, fotos_sin_archivo: nSin};
 }
 
 function onOpen() {
   try {
-    SpreadsheetApp.getUi().createMenu('Campo PDP').addItem('Exportar a QGIS (shapefiles en Drive)', 'exportarDesdeMenu').addToUi();
+    SpreadsheetApp.getUi().createMenu('Campo PDP').addItem('Exportar a QGIS y Google Earth (SHP, KMZ y KML en Drive)', 'exportarDesdeMenu').addToUi();
   } catch (e) {}
 }
 function exportarDesdeMenu() {
   var r = exportarQgis(), ui = SpreadsheetApp.getUi();
   var n = Object.keys(r.puntos).map(function (k) { return r.puntos[k] + ' ' + k.toLowerCase(); }).join(', ');
-  ui.alert(n ? 'Exportado: ' + n + '.\nCarpeta: ' + r.carpeta : 'No hay puntos vigentes que exportar.');
+  var k = r.kml || {};
+  var t = n ? 'Exportado: ' + n + '.\nCarpeta: ' + r.carpeta : 'No hay puntos vigentes que exportar.';
+  if (n) t += k.error ? '\nKMZ/KML no generados: ' + k.error : '\nKMZ con ' + (k.fotos_incrustadas || 0) + ' fotos incrustadas y KML con enlaces.';
+  ui.alert(t);
 }

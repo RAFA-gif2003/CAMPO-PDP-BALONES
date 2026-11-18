@@ -52,3 +52,12 @@ Pestañas `POZO`, `Fotos` y `Dominios` (se crean solas al primer envío). Cada f
 ## Exportar a QGIS (v1.9)
 
 La exportación la hace el servidor desde la hoja y la deja en Drive, en la carpeta `Exportacion QGIS` (junto a la hoja). Se lanza desde la app (Más > Exportar) o desde la hoja (menú «Campo PDP» > Exportar a QGIS). Genera `POZOS`, `IMBORNALES` y `VERTIDOS` (ETRS89 / UTM 30N, UTF-8) y un ZIP con ellos. Los puntos anulados no se exportan. Cada exportación sustituye a la anterior. Las columnas `FOTO_1` a `FOTO_5` llevan el nombre de la foto y `URL_1` a `URL_5` su enlace en Drive. Tras actualizar el script, hay que volver a ejecutar `autorizarDrive` (hay un permiso nuevo) y crear una nueva versión de la implementación.
+
+## Exportar a Google Earth (v1.10)
+
+La misma exportación genera en la carpeta `Exportacion QGIS` dos archivos más con todos los puntos vigentes (carpetas Pozos, Imbornales y Puntos de vertido, con icono y color distintos; al pinchar, tabla de atributos y fotos):
+
+- `Puntos_PDP_Balones.kmz`: lleva las fotos incrustadas, así que se ven sin depender de Drive. Si las fotos superan 40 MB (`KMZ_MAX_MB` en el script), las que no caben van como enlace a Drive.
+- `Puntos_PDP_Balones_enlaces.kml`: ligero, con enlaces a las fotos en Drive. Las fotos solo se ven para quien tenga acceso a la carpeta «Fotos PDP Balones». El script nunca cambia los permisos de Drive: eso lo decide el responsable.
+
+Se abren con Google Earth (web, escritorio o móvil). En «Mis mapas» (mymaps.google.com) se pueden importar, pero las fotos incrustadas del KMZ no se garantizan. Tras actualizar el script no hace falta repetir `autorizarDrive`, solo crear una nueva versión de la implementación.
