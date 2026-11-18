@@ -61,3 +61,5 @@ La misma exportación genera en la carpeta `Exportacion QGIS` dos archivos más 
 - `Puntos_PDP_Balones_enlaces.kml`: ligero, con enlaces a las fotos en Drive. Las fotos solo se ven para quien tenga acceso a la carpeta «Fotos PDP Balones». El script nunca cambia los permisos de Drive: eso lo decide el responsable.
 
 Se abren con Google Earth (web, escritorio o móvil). En «Mis mapas» (mymaps.google.com) se pueden importar, pero las fotos incrustadas del KMZ no se garantizan. Tras actualizar el script no hace falta repetir `autorizarDrive`, solo crear una nueva versión de la implementación.
+
+El KML y el KMZ llevan además los atributos como datos extendidos (mismos nombres de columna que los shapefiles, con `FOTO_1…` y `URL_1…`), de modo que QGIS los importa como columnas. Las fotos en QGIS se siguen enlazando con la `URL_n` de Drive o con la carpeta local, como en los shapefiles.

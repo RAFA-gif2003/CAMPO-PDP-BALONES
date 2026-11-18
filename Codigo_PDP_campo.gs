@@ -519,7 +519,15 @@ function puntosKml_() {
         var c = texto_(get(r, 'conductos'));
         if (c) attrs.push(['Conductos', c]);
       }
+      var datos = [['ID', texto_(get(r, 'id_elemento')), 's'], ['CAPA', capa, 's'], ['USUARIO', texto_(get(r, 'usuario')), 's'],
+        ['FECHA', texto_(get(r, 'fecha_hora')), 's'], ['LAT', Number(la), 'n'], ['LON', Number(lo), 'n'],
+        ['PREC_M', num_(get(r, 'precision_gps_m')), 'n'], ['CALIDAD', texto_(get(r, 'calidad')), 's'], ['REF', texto_(get(r, 'ref_id')), 's']];
+      ATTR[capa].forEach(function (k) {
+        datos.push([SHP_COLS[k] || k.slice(0, 10).toUpperCase(), ATTR_NUM[k] ? num_(get(r, k)) : texto_(get(r, k)), ATTR_NUM[k] ? 'n' : 's']);
+      });
+      if (capa === 'POZO') datos.push(['N_ENTR', num_(get(r, 'n_entradas')), 'n'], ['N_SAL', num_(get(r, 'n_salidas')), 'n'], ['CONDUCTOS', texto_(get(r, 'conductos')), 's']);
       out.push({
+        datos: datos,
         capa: capa, id: texto_(get(r, 'id_elemento')), lat: Number(la), lon: Number(lo), usuario: texto_(get(r, 'usuario')),
         fecha: texto_(get(r, 'fecha_hora')), prec: texto_(get(r, 'precision_gps_m')), calidad: texto_(get(r, 'calidad')),
         ref: texto_(get(r, 'ref_id')), attrs: attrs,
@@ -539,6 +547,17 @@ function kmlTexto_(puntos, modo, archivos, incrustadas) {
     var e = KML_ESTILOS[k];
     x.push('<Style id="s' + k + '"><IconStyle><color>' + e.color + '</color><scale>1.1</scale><Icon><href>' + e.icono + '</href></Icon></IconStyle>' +
       '<LabelStyle><scale>0.8</scale></LabelStyle></Style>');
+  });
+  Object.keys(KML_ESTILOS).forEach(function (capa) {
+    var m = puntos.filter(function (p) { return p.capa === capa; })[0];
+    if (!m) return;
+    var sc = ['<Schema name="' + capa + '" id="d' + capa + '">'];
+    m.datos.forEach(function (d) { sc.push('<SimpleField name="' + d[0] + '" type="' + (d[2] === 'n' ? 'double' : 'string') + '"/>'); });
+    sc.push('<SimpleField name="N_FOTOS" type="double"/>');
+    for (var i = 1; i <= MAX_FOTOS_COL; i++) sc.push('<SimpleField name="FOTO_' + i + '" type="string"/>');
+    for (i = 1; i <= MAX_FOTOS_COL; i++) sc.push('<SimpleField name="URL_' + i + '" type="string"/>');
+    sc.push('</Schema>');
+    x.push(sc.join(''));
   });
   Object.keys(KML_ESTILOS).forEach(function (capa) {
     var lista = puntos.filter(function (p) { return p.capa === capa; });
@@ -565,8 +584,18 @@ function kmlTexto_(puntos, modo, archivos, incrustadas) {
             '<a href="' + enlace + '">Abrir foto en Drive</a> · ' + esc_(n) + '</p>';
         }
       });
+      var ed = ['<ExtendedData><SchemaData schemaUrl="#d' + capa + '">'];
+      var sd = function (n, v) { if (v !== '' && v !== null && v !== undefined) ed.push('<SimpleData name="' + n + '">' + esc_(v) + '</SimpleData>'); };
+      p.datos.forEach(function (d) { sd(d[0], d[1]); });
+      sd('N_FOTOS', p.fotos.length);
+      for (var q = 0; q < MAX_FOTOS_COL; q++) {
+        var nf = p.fotos[q], ff = nf ? archivos[nf] : null;
+        sd('FOTO_' + (q + 1), nf || '');
+        sd('URL_' + (q + 1), ff ? 'https://drive.google.com/file/d/' + ff.getId() + '/view' : '');
+      }
+      ed.push('</SchemaData></ExtendedData>');
       x.push('<Placemark><name>' + esc_(p.id) + '</name><styleUrl>#s' + capa + '</styleUrl>' +
-        '<description><![CDATA[' + d.replace(/\]\]>/g, ']]&gt;') + ']]></description>' +
+        '<description><![CDATA[' + d.replace(/\]\]>/g, ']]&gt;') + ']]></description>' + ed.join('') +
         '<Point><coordinates>' + p.lon.toFixed(8) + ',' + p.lat.toFixed(8) + ',0</coordinates></Point></Placemark>');
     });
     x.push('</Folder>');
