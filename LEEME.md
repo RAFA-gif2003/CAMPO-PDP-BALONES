@@ -63,3 +63,9 @@ La misma exportación genera en la carpeta `Exportacion QGIS` dos archivos más 
 Se abren con Google Earth (web, escritorio o móvil). En «Mis mapas» (mymaps.google.com) se pueden importar, pero las fotos incrustadas del KMZ no se garantizan. Tras actualizar el script no hace falta repetir `autorizarDrive`, solo crear una nueva versión de la implementación.
 
 El KML y el KMZ llevan además los atributos como datos extendidos (mismos nombres de columna que los shapefiles, con `FOTO_1…` y `URL_1…`), de modo que QGIS los importa como columnas. Las fotos en QGIS se siguen enlazando con la `URL_n` de Drive o con la carpeta local, como en los shapefiles.
+
+## Quién puede exportar (v1.11)
+
+Las carpetas «Exportacion QGIS» y «Fotos PDP Balones» son privadas (solo el propietario). La exportación se puede lanzar de dos maneras:
+- Desde la hoja de Google (menú Campo PDP): solo quien tenga acceso a la hoja. No requiere clave.
+- Desde la app (Más > Exportar): desactivada por defecto. Para activarla, rellenar `EXPORT_CLAVE` en el script y crear una nueva versión; la app pide esa clave cada vez y no la guarda.
