@@ -2,7 +2,7 @@
    Implementar como aplicación web: Ejecutar como YO · Acceso: cualquier usuario.
    Antes de implementar, ejecutar UNA vez la función autorizarDrive(). */
 
-var EXPORT_CLAVE = '';                       // clave para exportar desde la app. Vacía = la exportación solo se puede lanzar desde la hoja (menú Campo PDP)
+var EXPORT_CLAVE = '';                       // PIN del responsable (el mismo de la app) para exportar desde la app. Vacío = solo desde la hoja (menú Campo PDP)
 var CLAVE = '';                              // si se rellena, la app debe enviar la misma clave
 var CARPETA_FOTOS = 'Fotos PDP Balones';     // se crea junto a la hoja (misma carpeta de Drive)
 var HOJA_FOTOS = 'Fotos';
@@ -273,7 +273,7 @@ function doGet(e) {
   if (q === 'dominios') return json_({ok: true, dominios: leerDominios_()});
   if (q === 'exportar') {
     if (!EXPORT_CLAVE) return json_({ok: false, error: 'La exportación desde la app está desactivada. Hazla desde la hoja de Google: menú Campo PDP.'});
-    if (!e.parameter || e.parameter.exp !== EXPORT_CLAVE) return json_({ok: false, error: 'clave de exportación incorrecta'});
+    if (!e.parameter || e.parameter.exp !== EXPORT_CLAVE) return json_({ok: false, error: 'PIN de responsable incorrecto'});
     var lock = LockService.getScriptLock();
     try { lock.waitLock(25000); return json_({ok: true, exportacion: exportarQgis()}); }
     catch (err) { return json_({ok: false, error: String(err && err.message || err)}); }

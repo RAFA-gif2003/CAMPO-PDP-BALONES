@@ -68,4 +68,4 @@ El KML y el KMZ llevan además los atributos como datos extendidos (mismos nombr
 
 Las carpetas «Exportacion QGIS» y «Fotos PDP Balones» son privadas (solo el propietario). La exportación se puede lanzar de dos maneras:
 - Desde la hoja de Google (menú Campo PDP): solo quien tenga acceso a la hoja. No requiere clave.
-- Desde la app (Más > Exportar): desactivada por defecto. Para activarla, rellenar `EXPORT_CLAVE` en el script y crear una nueva versión; la app pide esa clave cada vez y no la guarda.
+- Desde la app (Más > Exportar): desactivada por defecto. Para activarla, escribir el PIN de responsable en `EXPORT_CLAVE` en el script (solo en tu copia de Apps Script, nunca en el repositorio público) y crear una nueva versión. La app usa el PIN con el que se entró en modo responsable.

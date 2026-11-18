@@ -202,7 +202,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
   <div class="fila"><label>Descargar el mapa base del casco (PNOA e IGN Base)</label><button id="btnTeselas" class="b sec" type="button" style="height:44px">Descargar</button></div>
   <div id="teselasInfo" class="muted" style="padding:4px 0"></div>
   <div class="grupo">Para QGIS</div>
-  <div class="fila"><label>Exportar a Drive shapefiles, KMZ y KML de pozos, imbornales y vertidos (solo el responsable, con clave de exportación)</label><button id="btnShp" class="b sec" type="button" style="height:44px">Exportar</button></div>
+  <div class="fila"><label>Exportar a Drive shapefiles, KMZ y KML de pozos, imbornales y vertidos (solo el responsable, con su PIN)</label><button id="btnShp" class="b sec" type="button" style="height:44px">Exportar</button></div>
   <div id="shpInfo" class="muted" style="padding:4px 0"></div>
   <div class="grupo">Copia de seguridad</div>
   <div class="fila"><label>Descargar los puntos de este móvil (CSV)</label><button id="btnCsv" class="b sec" type="button" style="height:44px">CSV</button></div>
@@ -273,7 +273,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.11';
+const VERSION = '1.12';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR_MAX = 30;                                 // duración normal de la toma (s)
 let durActual = DUR_MAX;
@@ -1195,7 +1195,7 @@ let persist = null;
 async function entrarPin(){
   try {
     const h = await sha256(($('inPin').value || '').trim());
-    if (h === PIN_HASH){ responsable = true; try { sessionStorage.setItem('pdpResp', '1'); } catch(e){} pintarMas(); }
+    if (h === PIN_HASH){ responsable = true; try { sessionStorage.setItem('pdpResp', '1'); sessionStorage.setItem('pdpRespPin', ($('inPin').value || '').trim()); } catch(e){} pintarMas(); }
     else $('errPin').textContent = 'PIN incorrecto.';
   } catch(e){ $('errPin').textContent = 'Este navegador no permite comprobar el PIN (hace falta https).'; }
 }
@@ -1226,7 +1226,9 @@ async function exportarDrive(){
   const info = $('shpInfo');
   if (!apiUrl()){ info.textContent = 'Falta el enlace del servidor (Más > Enlace).'; return; }
   if (!navigator.onLine){ info.textContent = 'Hace falta cobertura para exportar.'; return; }
-  const exp = prompt('Clave de exportación (la fija el responsable en el script). Si no la tienes, exporta desde la hoja de Google.');
+  if (!responsable){ info.textContent = 'La exportación es solo para el responsable. Introduce el PIN de responsable en esta misma pantalla (Más).'; return; }
+  let exp = ''; try { exp = sessionStorage.getItem('pdpRespPin') || ''; } catch(e){}
+  if (!exp) exp = (prompt('PIN de responsable') || '').trim();
   if (!exp) return;
   const pend = pendTotal();
   if (pend && !confirm('Hay ' + pend + ' elementos de este móvil sin enviar a la hoja. La exportación solo incluye lo que ya está en la hoja. ¿Exportar igualmente?')) return;
@@ -1234,7 +1236,7 @@ async function exportarDrive(){
   try {
     const r = await fetch(apiUrl() + '?q=exportar&clave=' + encodeURIComponent(clave()) + '&exp=' + encodeURIComponent(exp));
     const j = await r.json();
-    if (!j || j.ok !== true) throw new Error(j && j.error ? j.error : 'respuesta inesperada');
+    if (!j || j.ok !== true){ if (j && /clave/i.test(j.error || '')){ try { sessionStorage.removeItem('pdpRespPin'); } catch(e){} } throw new Error(j && j.error ? j.error : 'respuesta inesperada'); }
     const e = j.exportacion || {}, k = Object.keys(e.puntos || {});
     if (!k.length){ info.textContent = 'No hay puntos vigentes en la hoja que exportar.'; return; }
     const kk = e.kml || {};
