@@ -271,9 +271,15 @@ function doGet(e) {
   var q = e && e.parameter && e.parameter.q;
   if (CLAVE && (!e.parameter || e.parameter.clave !== CLAVE)) return json_({ok: false, error: 'clave incorrecta'});
   if (q === 'dominios') return json_({ok: true, dominios: leerDominios_()});
-  if (q === 'exportar') {
-    if (!EXPORT_CLAVE) return json_({ok: false, error: 'La exportación desde la app está desactivada. Hazla desde la hoja de Google: menú Campo PDP.'});
+  if (q === 'exportar' || q === 'puntos') {
+    if (!EXPORT_CLAVE) return json_({ok: false, error: 'Esta función desde la app está desactivada. Usa la hoja de Google (menú Campo PDP).'});
     if (!e.parameter || e.parameter.exp !== EXPORT_CLAVE) return json_({ok: false, error: 'PIN de responsable incorrecto'});
+  }
+  if (q === 'puntos') {
+    try { return json_({ok: true, capas: puntosGeo_()}); }
+    catch (err) { return json_({ok: false, error: String(err && err.message || err)}); }
+  }
+  if (q === 'exportar') {
     var lock = LockService.getScriptLock();
     try { lock.waitLock(25000); return json_({ok: true, exportacion: exportarQgis()}); }
     catch (err) { return json_({ok: false, error: String(err && err.message || err)}); }
@@ -529,7 +535,13 @@ function puntosKml_() {
         datos.push([SHP_COLS[k] || k.slice(0, 10).toUpperCase(), ATTR_NUM[k] ? num_(get(r, k)) : texto_(get(r, k)), ATTR_NUM[k] ? 'n' : 's']);
       });
       if (capa === 'POZO') datos.push(['N_ENTR', num_(get(r, 'n_entradas')), 'n'], ['N_SAL', num_(get(r, 'n_salidas')), 'n'], ['CONDUCTOS', texto_(get(r, 'conductos')), 's']);
+      var fotosArr = texto_(get(r, 'fotos')).split(' | ').filter(function (x) { return x; });
+      var pr = {id: texto_(get(r, 'id_elemento')), usuario: texto_(get(r, 'usuario')), fecha: texto_(get(r, 'fecha_hora')),
+        calidad: texto_(get(r, 'calidad')), prec: num_(get(r, 'precision_gps_m')), ref: texto_(get(r, 'ref_id')), n_fotos: fotosArr.length};
+      ATTR[capa].forEach(function (k) { pr[k] = ATTR_NUM[k] ? num_(get(r, k)) : texto_(get(r, k)); });
+      if (capa === 'POZO') { pr.n_entradas = num_(get(r, 'n_entradas')); pr.n_salidas = num_(get(r, 'n_salidas')); pr.conductos = texto_(get(r, 'conductos')); }
       out.push({
+        props: pr,
         datos: datos,
         capa: capa, id: texto_(get(r, 'id_elemento')), lat: Number(la), lon: Number(lo), usuario: texto_(get(r, 'usuario')),
         fecha: texto_(get(r, 'fecha_hora')), prec: texto_(get(r, 'precision_gps_m')), calidad: texto_(get(r, 'calidad')),
@@ -634,6 +646,22 @@ function exportarKml_(carp) {
   var kml = sustituirArchivo_(carp, Utilities.newBlob(kmlTexto_(puntos, 'enlaces', archivos, {}), 'application/vnd.google-earth.kml+xml', 'Puntos_PDP_Balones_enlaces.kml'));
   return {kmz: kmz.getUrl(), kml: kml.getUrl(), puntos: puntos.length, fotos_incrustadas: Object.keys(incrustadas).length,
     fotos_enlace: nEnlace, fotos_sin_archivo: nSin};
+}
+
+/* GeoJSON de los puntos vigentes por capa, para verlos en el plano de la app (solo responsable). */
+var GEO_ETQ_EXTRA = {id: 'ID', usuario: 'Usuario', fecha: 'Fecha', calidad: 'Calidad', prec: 'Precisión GPS (m)', ref: 'Elemento de referencia',
+  n_fotos: 'Nº de fotos', n_entradas: 'Entradas', n_salidas: 'Salidas', conductos: 'Conductos'};
+function puntosGeo_() {
+  var out = {};
+  puntosKml_().forEach(function (p) {
+    var o = out[p.capa];
+    if (!o) {
+      var ks = ['id'].concat(ATTR[p.capa]).concat(p.capa === 'POZO' ? ['n_entradas', 'n_salidas', 'conductos'] : []).concat(['n_fotos', 'usuario', 'fecha', 'calidad', 'prec', 'ref']);
+      o = out[p.capa] = {campos: ks.map(function (k) { return {k: k, etq: KML_ETIQ[k] || GEO_ETQ_EXTRA[k] || k}; }), features: []};
+    }
+    o.features.push({type: 'Feature', geometry: {type: 'Point', coordinates: [Number(p.lon.toFixed(8)), Number(p.lat.toFixed(8))]}, properties: p.props});
+  });
+  return out;
 }
 
 function onOpen() {

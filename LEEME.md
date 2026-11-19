@@ -69,3 +69,12 @@ El KML y el KMZ llevan además los atributos como datos extendidos (mismos nombr
 Las carpetas «Exportacion QGIS» y «Fotos PDP Balones» son privadas (solo el propietario). La exportación se puede lanzar de dos maneras:
 - Desde la hoja de Google (menú Campo PDP): solo quien tenga acceso a la hoja. No requiere clave.
 - Desde la app (Más > Exportar): desactivada por defecto. Para activarla, escribir el PIN de responsable en `EXPORT_CLAVE` en el script (solo en tu copia de Apps Script, nunca en el repositorio público) y crear una nueva versión. La app usa el PIN con el que se entró en modo responsable.
+
+## Plano con etiquetas y categorías (v1.13)
+
+En Capas > Estilo de cada capa:
+- **Etiqueta:** campo que se escribe junto a cada elemento (nombre de pozo, diámetro con «Ø», etc.) y tamaño del texto. Las etiquetas se ocultan con el mapa muy alejado (zoom menor de 16).
+- **Colorear:** pinta los elementos por categorías de un campo (por ejemplo el diámetro de las tuberías). La leyenda aparece abajo a la derecha y recoge todas las capas coloreadas que estén visibles.
+- Todo se recuerda en ese móvil o navegador. «Restablecer» lo quita.
+
+Puntos tomados por todos: Más > «Cargar en el mapa los puntos tomados por todos los usuarios» (solo responsable). Trae los puntos vigentes de la hoja y los añade como capas «Toma de datos (hoja)», con sus propios atributos para etiquetar y colorear. Quedan guardados en el móvil para verlos sin cobertura hasta la siguiente carga. Requiere `EXPORT_CLAVE` rellena en el script (el mismo PIN) y una nueva versión de la implementación.

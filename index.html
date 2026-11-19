@@ -107,6 +107,14 @@ button.b:disabled{opacity:.45}
 table.at{border-collapse:collapse;font-size:13px;width:100%}
 table.at td{border-bottom:1px solid #e3eaef;padding:2px 4px;vertical-align:top}
 table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
+.leaflet-tooltip.etq{background:rgba(255,255,255,.82);border:0;box-shadow:none;padding:0 3px;color:#111;font-weight:600;white-space:nowrap;line-height:1.25}
+.leaflet-tooltip.etq:before{display:none}
+.etq.s9{font-size:9px}.etq.s11{font-size:11px}.etq.s13{font-size:13px}.etq.s15{font-size:15px}
+#mapa.sinetq .leaflet-tooltip.etq{display:none}
+.leyenda{background:rgba(255,255,255,.92);border-radius:8px;padding:6px 8px;font-size:12px;max-height:38vh;overflow:auto;box-shadow:0 1px 4px rgba(0,0,0,.3);max-width:190px}
+.leyenda .lt{font-weight:700;margin:4px 0 2px}.leyenda .lf{display:flex;align-items:center;gap:6px;margin:1px 0}
+.leyenda i{display:inline-block;width:14px;height:10px;border-radius:2px;border:1px solid rgba(0,0,0,.35);flex:none}
+.ajuste select{flex:1;min-width:0;height:38px;border:1px solid #9fb2bf;border-radius:6px;background:#fff;font-size:14px}
 .halo path{filter:drop-shadow(0 0 1px #fff) drop-shadow(0 0 1.5px #fff)}
 .ajuste{background:#eef3f6;border-radius:8px;padding:8px 10px;margin:4px 0 8px}
 .ajuste .f2{display:flex;align-items:center;gap:8px;margin:6px 0;font-size:14px}
@@ -201,6 +209,9 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
   <div class="grupo">Mapa sin cobertura</div>
   <div class="fila"><label>Descargar el mapa base del casco (PNOA e IGN Base)</label><button id="btnTeselas" class="b sec" type="button" style="height:44px">Descargar</button></div>
   <div id="teselasInfo" class="muted" style="padding:4px 0"></div>
+  <div class="grupo">Plano con todos los puntos</div>
+  <div class="fila"><label>Cargar en el mapa los puntos tomados por todos los usuarios (solo el responsable, con su PIN)</label><button id="btnHoja" class="b sec" type="button" style="height:44px">Cargar</button></div>
+  <div id="hojaInfo" class="muted" style="padding:4px 0"></div>
   <div class="grupo">Para QGIS</div>
   <div class="fila"><label>Exportar a Drive shapefiles, KMZ y KML de pozos, imbornales y vertidos (solo el responsable, con su PIN)</label><button id="btnShp" class="b sec" type="button" style="height:44px">Exportar</button></div>
   <div id="shpInfo" class="muted" style="padding:4px 0"></div>
@@ -273,7 +284,7 @@ table.at td:first-child{color:var(--muted);white-space:nowrap;padding-right:8px}
    Campo PDP Balones · fase 1 (mapa, referencia, toma de POZO)
    Colas offline: datos en localStorage, fotos en IndexedDB.
    ==================================================================== */
-const VERSION = '1.12';
+const VERSION = '1.13';
 const PRUEBA = location.hash === '#t5';            // solo para las pruebas de arranque: toma de 5 s
 const DUR_MAX = 30;                                 // duración normal de la toma (s)
 let durActual = DUR_MAX;
@@ -436,6 +447,7 @@ const BASES = [
   {id:'osm', nombre:'OpenStreetMap', url:'https://tile.openstreetmap.org/{z}/{x}/{y}.png',
    opts:{maxNativeZoom:19, maxZoom:21, attribution:'© OpenStreetMap contributors'}}
 ];
+let leyenda = null;
 let mapa = null, capaBase = null, capasBase = {}, capaCatastro = null, capasRef = {}, capaTom = null;
 let capasDatos = [];
 let cfgMapa = {base:'pnoa', over:{}};
@@ -460,6 +472,10 @@ function iniciarMapa(){
   capaTom = L.layerGroup();
   if (cfgMapa.over.tomados !== false) capaTom.addTo(mapa);
   mapa.on('dragstart', () => { seguir = false; });
+  leyenda = L.control({position:'bottomright'});
+  leyenda.onAdd = () => { const d = L.DomUtil.create('div', 'leyenda'); d.style.display = 'none'; L.DomEvent.disableClickPropagation(d); L.DomEvent.disableScrollPropagation(d); return d; };
+  leyenda.addTo(mapa);
+  mapa.on('zoomend', ajustarEtq); ajustarEtq();
 }
 
 function guardarCfgMapa(){ lsSetJ(K.mapa, cfgMapa); }
@@ -480,10 +496,46 @@ function tablaAtributos(capa, props){
     .map(c => '<tr><td>' + esc(c.etq) + '</td><td>' + esc(props[c.k]) + '</td></tr>').join('');
   return '<b>' + esc(capa.nombre) + '</b><table class="at">' + filas + '</table>';
 }
+const PALETA = ['#e41a1c','#377eb8','#4daf4a','#984ea3','#ff7f00','#a65628','#f781bf','#17becf','#bcbd22','#000000','#66c2a5','#fc8d62'];
+function catInfo(capa, campo){
+  capa._cat = capa._cat || {};
+  if (capa._cat[campo]) return capa._cat[campo];
+  const vals = {};
+  ((capa.geojson && capa.geojson.features) || []).forEach(f => { const v = f.properties ? f.properties[campo] : null; vals[v == null ? '' : String(v)] = true; });
+  let orden = Object.keys(vals);
+  const numerico = orden.length && orden.every(v => v === '' || isFinite(Number(v)));
+  orden.sort((a, b) => a === '' ? 1 : b === '' ? -1 : numerico ? Number(a) - Number(b) : a.localeCompare(b, 'es'));
+  const col = {}, otros = '#7f7f7f';
+  orden.forEach((v, i) => { col[v] = v === '' ? '#b0b0b0' : (i < PALETA.length ? PALETA[i] : otros); });
+  return capa._cat[campo] = {orden:orden, col:col, otros:otros};
+}
+function etqCampo(capa, k){ const c = (capa.campos || []).find(x => x.k === k); return c ? c.etq : k; }
+function etqTexto(capa, props, k){
+  const v = props ? props[k] : null;
+  if (v == null || v === '') return '';
+  return (/diam/i.test(k) ? 'Ø' : '') + String(v);
+}
+function actualizarLeyenda(){
+  if (!leyenda || !mapa) return;
+  const div = leyenda.getContainer(); if (!div) return;
+  let h = '';
+  capasDatos.forEach(c => {
+    const e = estCapa(c.id); if (!e.cat) return;
+    const l = capasRef[c.id]; if (!l || !mapa.hasLayer(l)) return;
+    const ci = catInfo(c, e.cat);
+    h += '<div class="lt">' + esc(c.nombre) + ' · ' + esc(etqCampo(c, e.cat)) + '</div>' +
+      ci.orden.map(k => '<div class="lf"><i style="background:' + esc(ci.col[k]) + '"></i>' + esc(k === '' ? '(sin dato)' : k) + '</div>').join('');
+  });
+  div.innerHTML = h; div.style.display = h ? 'block' : 'none';
+}
+function ajustarEtq(){ const m = $('mapa'); if (m && mapa) m.classList.toggle('sinetq', mapa.getZoom() < 16); }
 function estCapa(id){ const e = (cfgMapa.est || {})[id]; return e && typeof e === 'object' ? e : {}; }
 function estEfectivo(capa, props){
   const b = Object.assign({}, estiloDe(capa, props)), e = estCapa(capa.id);
-  if (e.color){ if (capa.tipo === 'linea') b.color = e.color; else b.fill = e.color; }
+  if (e.cat){
+    const ci = catInfo(capa, e.cat), v = props ? props[e.cat] : null, c = ci.col[v == null ? '' : String(v)] || ci.otros;
+    if (capa.tipo === 'linea') b.color = c; else b.fill = c;
+  } else if (e.color){ if (capa.tipo === 'linea') b.color = e.color; else b.fill = e.color; }
   if (e.w != null){ if (capa.tipo === 'punto') b.r = e.w; else b.w = e.w; }
   return b;
 }
@@ -507,9 +559,17 @@ function cargarCapaRef(capa){
   } else {
     lyr = L.geoJSON(capa.geojson, {pane:'pPoli', style: f => { const s = estEfectivo(capa, f.properties); return {color:s.color, weight:s.w, fillColor:s.fill, fillOpacity:s.fo == null ? .15 : s.fo, dashArray:capa.dash || null}; }});
   }
-  lyr.eachLayer(l => { l.bindPopup(() => tablaAtributos(capa, l.feature.properties)); });
+  lyr.eachLayer(l => {
+    l.bindPopup(() => tablaAtributos(capa, l.feature.properties));
+    if (e0.etq){
+      const t = etqTexto(capa, l.feature.properties, e0.etq);
+      if (t) l.bindTooltip(t, {permanent:true, direction:capa.tipo === 'punto' ? 'right' : 'center', offset:capa.tipo === 'punto' ? [6, 0] : [0, 0],
+        className:'etq s' + (e0.et || 11), opacity:1, interactive:false});
+    }
+  });
   capasRef[capa.id] = lyr;
   if (on && mapa) lyr.addTo(mapa);
+  actualizarLeyenda();
 }
 async function cargarCapas(){
   try {
@@ -528,6 +588,7 @@ async function cargarCapas(){
     const g = capasRef.pds_pozos;
     if (g && g.getBounds().isValid() && !centradoInicial) mapa.fitBounds(g.getBounds().pad(0.15));
   } catch(e){}
+  restaurarHoja();
   pintarListaCapas();
 }
 function swatchCapa(c){
@@ -540,6 +601,9 @@ function swatchCapa(c){
   }
   const t = c.tipo === 'punto' ? Math.max(10, Math.min(20, 6 + (e.w != null ? e.w : (m.r || 6)))) : 14;
   return '<span class="sw" style="background:' + esc(c.tipo === 'punto' ? relleno : 'transparent') + ';border-color:' + esc(c.tipo === 'punto' ? m.color : relleno) + ';border-style:' + (c.dash ? 'dashed' : 'solid') + ';width:' + t + 'px;height:' + t + 'px;border-radius:' + (c.tipo === 'punto' ? '50%' : '3px') + '"></span>';
+}
+function optsCampos(c, sel){
+  return '<option value="">(ninguno)</option>' + (c.campos || []).map(f => '<option value="' + esc(f.k) + '"' + (sel === f.k ? ' selected' : '') + '>' + esc(f.etq) + '</option>').join('');
 }
 function pintarListaCapas(){
   $('listaBases').innerHTML = BASES.map(b =>
@@ -564,6 +628,9 @@ function pintarListaCapas(){
       h += '<div class="fila"><input type="checkbox" id="r_' + c.id + '" data-ref="' + c.id + '"' + (on ? ' checked' : '') + '><label for="r_' + c.id + '"><span id="sw_' + c.id + '">' + swatchCapa(c) + '</span>' + esc(c.nombre) + ' <span class="muted">(' + c.n + ')</span></label>' +
         '<button type="button" class="b sec" data-ajustar="' + c.id + '" style="height:36px;font-size:13px;padding:0 10px">Estilo</button></div>' +
         '<div class="ajuste" id="aj_' + c.id + '" hidden>' +
+        '<div class="f2"><span style="width:62px">Etiqueta</span><select data-est="etq" data-capa="' + c.id + '">' + optsCampos(c, ef.etq) + '</select>' +
+        '<select data-est="et" data-capa="' + c.id + '" style="flex:none;width:64px">' + [9, 11, 13, 15].map(n => '<option value="' + n + '"' + ((ef.et || 11) === n ? ' selected' : '') + '>' + n + ' px</option>').join('') + '</select></div>' +
+        '<div class="f2"><span style="width:62px">Colorear</span><select data-est="cat" data-capa="' + c.id + '">' + optsCampos(c, ef.cat) + '</select></div>' +
         '<div class="f2"><span style="width:62px">Color</span><input type="color" data-est="color" data-capa="' + c.id + '" value="' + esc(/^#[0-9a-f]{6}$/i.test(colBase) ? colBase : '#000000') + '"></div>' +
         '<div class="f2"><span style="width:62px">' + (esPun ? 'Tamaño' : 'Grosor') + '</span><input type="range" data-est="w" data-capa="' + c.id + '" min="' + (esPun ? 3 : 1) + '" max="' + (esPun ? 14 : 12) + '" step="' + (esPun ? 1 : 0.5) + '" value="' + wBase + '"><span class="muted" id="awv_' + c.id + '">' + wBase + '</span></div>' +
         (esLin ? '<div class="f2"><input type="checkbox" id="ah_' + c.id + '" data-est="halo" data-capa="' + c.id + '"' + (halo ? ' checked' : '') + ' style="width:22px;height:22px"><label for="ah_' + c.id + '">Contorno blanco (se ve mejor sobre la ortofoto)</label></div>' : '') +
@@ -607,11 +674,13 @@ function conectarListaCapas(){
       if (t.dataset.est === 'color') e.color = t.value;
       else if (t.dataset.est === 'w') e.w = parseFloat(t.value);
       else if (t.dataset.est === 'halo') e.halo = t.checked;
+      else if (t.dataset.est === 'etq' || t.dataset.est === 'cat'){ if (t.value) e[t.dataset.est] = t.value; else delete e[t.dataset.est]; }
+      else if (t.dataset.est === 'et') e.et = parseInt(t.value, 10);
       guardarCfgMapa(); cargarCapaRef(capa);
       const sw = $('sw_' + id); if (sw) sw.innerHTML = swatchCapa(capa);
     } else if (t.dataset && t.dataset.ref){
       const l = capasRef[t.dataset.ref]; if (!l) return;
-      cfgMapa.over['ref_' + t.dataset.ref] = t.checked; t.checked ? l.addTo(mapa) : mapa.removeLayer(l); guardarCfgMapa();
+      cfgMapa.over['ref_' + t.dataset.ref] = t.checked; t.checked ? l.addTo(mapa) : mapa.removeLayer(l); guardarCfgMapa(); actualizarLeyenda();
     }
   });
 }
@@ -1251,6 +1320,52 @@ async function exportarDrive(){
   } catch(err){ info.textContent = 'No se pudo exportar: ' + err.message + (/exception|drive|permission|autoriza/i.test(err.message) ? ' (¿hay que actualizar el script y volver a ejecutar autorizarDrive?)' : ''); logErr('export: ' + err.message); }
   finally { $('btnShp').disabled = false; }
 }
+/* ====================== plano con todos los puntos tomados (los de la hoja) ====================== */
+const HOJA_DEF = {
+  POZO:{nombre:'Pozos tomados (hoja)', estilo:{r:7, color:'#ffffff', fill:'#1f78b4', w:1.5}},
+  IMBORNAL:{nombre:'Imbornales tomados (hoja)', simbolo:'triangulo', estilo:{r:7, color:'#ffffff', fill:'#ff7f00', w:1.5}},
+  VERTIDO:{nombre:'Puntos de vertido tomados (hoja)', estilo:{r:7, color:'#ffffff', fill:'#e31a1c', w:1.5}}
+};
+function aplicarHoja(capas){
+  capasDatos = capasDatos.filter(c => {
+    if (String(c.id).indexOf('hoja_') !== 0) return true;
+    const l = capasRef[c.id]; if (l && mapa && mapa.hasLayer(l)) mapa.removeLayer(l);
+    delete capasRef[c.id]; return false;
+  });
+  Object.keys(HOJA_DEF).forEach(k => {
+    const v = capas && capas[k]; if (!v || !v.features || !v.features.length) return;
+    const d = HOJA_DEF[k];
+    const capa = {id:'hoja_' + k, nombre:d.nombre, tipo:'punto', grupo:'Toma de datos (hoja)', visible:true, estilo:d.estilo, simbolo:d.simbolo,
+      campos:v.campos, idCampo:'id', n:v.features.length, geojson:{type:'FeatureCollection', features:v.features}};
+    capasDatos.push(capa);
+    try { cargarCapaRef(capa); } catch(e){ logErr('hoja ' + k + ': ' + e.message); }
+  });
+  pintarListaCapas();
+}
+function restaurarHoja(){
+  try { const t = localStorage.getItem('pdpHoja'); if (t) aplicarHoja(JSON.parse(t)); } catch(e){ logErr('restaurar hoja: ' + e.message); }
+}
+async function cargarHoja(){
+  const info = $('hojaInfo');
+  if (!apiUrl()){ info.textContent = 'Falta el enlace del servidor (Más > Enlace).'; return; }
+  if (!navigator.onLine){ info.textContent = 'Hace falta cobertura para cargar los puntos de la hoja.'; return; }
+  if (!responsable){ info.textContent = 'Es solo para el responsable. Introduce el PIN de responsable en esta misma pantalla (Más).'; return; }
+  let exp = ''; try { exp = sessionStorage.getItem('pdpRespPin') || ''; } catch(e){}
+  if (!exp) exp = (prompt('PIN de responsable') || '').trim();
+  if (!exp) return;
+  info.textContent = 'Cargando…'; $('btnHoja').disabled = true;
+  try {
+    const r = await fetch(apiUrl() + '?q=puntos&clave=' + encodeURIComponent(clave()) + '&exp=' + encodeURIComponent(exp));
+    const j = await r.json();
+    if (!j || j.ok !== true){ if (j && /PIN/i.test(j.error || '')){ try { sessionStorage.removeItem('pdpRespPin'); } catch(e){} } throw new Error(j && j.error ? j.error : 'respuesta inesperada'); }
+    const k = Object.keys(j.capas || {});
+    if (!k.length){ info.textContent = 'No hay puntos vigentes en la hoja.'; aplicarHoja({}); try { localStorage.removeItem('pdpHoja'); } catch(e){} return; }
+    aplicarHoja(j.capas);
+    try { localStorage.setItem('pdpHoja', JSON.stringify(j.capas)); } catch(e){ logErr('no cabe la copia local de la hoja'); }
+    info.textContent = 'Cargados: ' + k.map(n => j.capas[n].features.length + ' ' + n.toLowerCase()).join(', ') + '. Están en Capas > Toma de datos (hoja), con etiquetas y colores como el resto.';
+  } catch(err){ info.textContent = 'No se pudo cargar: ' + err.message; logErr('hoja: ' + err.message); }
+  finally { $('btnHoja').disabled = false; }
+}
 /* teselas del casco para trabajar sin cobertura */
 function xyz(lat, lon, z){
   const n = Math.pow(2, z), r = lat * Math.PI / 180;
@@ -1336,6 +1451,7 @@ function conectarBotones(){
   $('btnTeselas').addEventListener('click', descargarTeselas);
   $('btnCsv').addEventListener('click', csvPuntos);
   $('btnShp').addEventListener('click', exportarDrive);
+  $('btnHoja').addEventListener('click', cargarHoja);
   $('pMas').addEventListener('click', e => {
     const id = e.target && e.target.id;
     if (id === 'btnInstalar' && promptInst){ promptInst.prompt(); promptInst.userChoice.then(() => { promptInst = null; pintarInstalar(); }).catch(() => {}); }
